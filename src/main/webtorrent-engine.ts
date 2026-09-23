@@ -2,6 +2,7 @@ import { Effect, Layer, Stream } from 'effect'
 import type WebTorrent from 'webtorrent'
 import type { WebTorrentTorrent } from 'webtorrent'
 import { TorrentError } from '../shared/errors'
+import { DEFAULT_TRACKERS, SettingsService } from './settings'
 import {
   TorrentEngine,
   type TorrentHandle,
@@ -168,11 +169,7 @@ function load(
   })
 }
 
-/**
- * Real engine: one webtorrent client for the process, torn down with the layer's scope.
- * webtorrent 3.x is ESM with top-level await, so it is loaded through a dynamic import
- * â€” a static import compiles to `require()` in the CJS main bundle and fails at boot.
- */
+/** The webtorrent client options the engine derives from settings. */
 export interface WebTorrentOptions {
   readonly maxConns?: number
   readonly downloadLimit?: number
@@ -182,30 +179,49 @@ export interface WebTorrentOptions {
   readonly announce?: ReadonlyArray<string>
 }
 
-export const WebTorrentEngineLive = (options: WebTorrentOptions = {}) =>
-  Layer.scoped(
-    TorrentEngine,
-    Effect.gen(function* () {
-      const module = yield* Effect.promise(() => import('webtorrent'))
-      const client = yield* Effect.acquireRelease(
-        Effect.sync(
-          () =>
-            new module.default({
-              maxConns: options.maxConns,
-              downloadLimit: options.downloadLimit,
-              uploadLimit: options.uploadLimit,
-              dht: { concurrency: options.dhtConcurrency },
-              secure: options.secure,
-              tracker: { announce: options.announce },
-            }),
-        ),
-        (instance) =>
-          Effect.async<void>((resume) => {
-            instance.destroy(() => resume(Effect.void))
+/**
+ * Real engine: one webtorrent client for the process, torn down with the layer's scope. It
+ * reads its connection options from `Settings` when the layer is built, so migration runs
+ * first and no separate settings probe is needed. webtorrent 3.x is ESM with top-level await,
+ * so it is loaded through a dynamic import — a static import compiles to `require()` in the
+ * CJS main bundle and fails at boot.
+ */
+export const WebTorrentEngineLive = Layer.scoped(
+  TorrentEngine,
+  Effect.gen(function* () {
+    const settings = yield* SettingsService
+    const snapshot = yield* settings.snapshot
+    const options: WebTorrentOptions = {
+      maxConns: snapshot.connectionLimit,
+      dhtConcurrency: snapshot.maxUdpReqLimit,
+      secure: snapshot.protocolEncryption,
+      announce: snapshot.trackers.forced.length > 0 ? snapshot.trackers.forced : DEFAULT_TRACKERS,
+      downloadLimit: Number.parseFloat(snapshot.downloadLimit) * snapshot.maxLimitMult || -1,
+      uploadLimit: Number.parseFloat(snapshot.uploadLimit) * snapshot.maxLimitMult || -1,
+    }
+    console.log(
+      `[torrent] announce=${options.announce?.length ?? 0} maxConns=${String(options.maxConns)} dht=${String(options.dhtConcurrency)} secure=${String(options.secure)}`,
+    )
+    const module = yield* Effect.promise(() => import('webtorrent'))
+    const client = yield* Effect.acquireRelease(
+      Effect.sync(
+        () =>
+          new module.default({
+            maxConns: options.maxConns,
+            downloadLimit: options.downloadLimit,
+            uploadLimit: options.uploadLimit,
+            dht: { concurrency: options.dhtConcurrency },
+            secure: options.secure,
+            tracker: { announce: options.announce },
           }),
-      )
-      return TorrentEngine.of({
-        load: (torrentId, downloadPath) => load(client, torrentId, downloadPath),
-      })
-    }),
-  )
+      ),
+      (instance) =>
+        Effect.async<void>((resume) => {
+          instance.destroy(() => resume(Effect.void))
+        }),
+    )
+    return TorrentEngine.of({
+      load: (torrentId, downloadPath) => load(client, torrentId, downloadPath),
+    })
+  }),
+)

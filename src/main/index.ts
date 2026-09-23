@@ -6,22 +6,16 @@ import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'ele
 import {
   DatabaseService,
   DatabaseServiceLive,
-  Sqlite,
   SqliteLive,
   SqliteSettingsStoreLive,
 } from './database'
 import { type ExternalPlayersPort, registerIpc } from './ipc'
 import { LocalFiles, LocalFilesLive } from './localfiles'
-import { migrateLegacy, resolveLegacyProfileRoot } from './migration'
+import { LegacyMigrationLive, resolveLegacyProfileRoot } from './migration'
 import { launchPlayer, playerArgs, playerSearchPaths, scanPlayers } from './players'
 import { createRegistry } from './providers/registry'
 import { SEARCH_PROVIDERS, searchTorrents } from './search'
-import {
-  DEFAULT_TRACKERS,
-  type SettingsEnvironment,
-  SettingsService,
-  SettingsServiceLive,
-} from './settings'
+import { type SettingsEnvironment, SettingsService, SettingsServiceLive } from './settings'
 import { StreamManager, StreamManagerLive } from './streams'
 import { TorrentServiceLive } from './torrent'
 import { createAutoUpdaterPort, createUpdates } from './updates'
@@ -181,69 +175,36 @@ function createWindow(zoomPercent: number): BrowserWindow {
 }
 
 async function startServices() {
+  const environment = settingsEnvironment()
   const sqlite = SqliteLive(join(app.getPath('userData'), 'popcorn.sqlite'))
-  const settings = SettingsServiceLive(settingsEnvironment()).pipe(
-    Layer.provide(SqliteSettingsStoreLive.pipe(Layer.provide(sqlite))),
-  )
-  const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
-
-  // The torrent client takes the legacy connection settings, so read them before wiring it.
-  const settingsProbe = ManagedRuntime.make(settings)
-  const persisted = await settingsProbe.runPromise(
-    Effect.flatMap(SettingsService, (service) => service.snapshot),
-  )
-  await settingsProbe.dispose()
-
-  console.log(
-    `[torrent] announce=${persisted.trackers.forced.length} maxConns=${persisted.connectionLimit} dht=${persisted.maxUdpReqLimit} secure=${String(persisted.protocolEncryption)}`,
-  )
-  const streams = StreamManagerLive.pipe(
-    Layer.provide(
-      TorrentServiceLive.pipe(
-        Layer.provide(
-          WebTorrentEngineLive({
-            maxConns: persisted.connectionLimit,
-            dhtConcurrency: persisted.maxUdpReqLimit,
-            secure: persisted.protocolEncryption,
-            announce:
-              persisted.trackers.forced.length > 0 ? persisted.trackers.forced : DEFAULT_TRACKERS,
-            downloadLimit:
-              Number.parseFloat(persisted.downloadLimit) * persisted.maxLimitMult || -1,
-            uploadLimit: Number.parseFloat(persisted.uploadLimit) * persisted.maxLimitMult || -1,
-          }),
-        ),
-      ),
-    ),
-  )
-
-  const runtime = ManagedRuntime.make(
-    Layer.mergeAll(settings, database, sqlite, streams, LocalFilesLive),
-  )
 
   const legacy = resolveLegacyProfileRoot(legacyAppDataRoot(), process.platform)
-  const legacyRoot = legacy.root
-  if (legacyRoot === undefined) {
+  if (legacy.root === undefined) {
     console.warn(
       `[migration] no legacy profile with data/ found; checked ${legacy.checked.join(', ')}`,
     )
-  } else {
-    await runtime.runPromise(
-      Effect.gen(function* () {
-        const db = yield* Sqlite
-        yield* Effect.sync(() =>
-          migrateLegacy(db, legacyRoot, {
-            backupDir: join(app.getPath('userData'), 'backup', `legacy-${Date.now()}`),
-          }),
-        )
-      }).pipe(
-        Effect.catchAll((error) =>
-          Effect.sync(() => {
-            console.error('[migration] failed; continuing with an empty database', error)
-          }),
-        ),
-      ),
-    )
   }
+  const migration = LegacyMigrationLive({
+    legacyRoot: legacy.root,
+    backupDir: join(app.getPath('userData'), 'backup', `legacy-${Date.now()}`),
+    onError: (error) => {
+      console.error('[migration] failed; continuing with an empty database', error)
+    },
+  }).pipe(Layer.provide(sqlite))
+
+  // Settings depends on LegacyMigration, so building it runs migration before any read.
+  const settings = SettingsServiceLive(environment).pipe(
+    Layer.provide(SqliteSettingsStoreLive.pipe(Layer.provide(sqlite))),
+    Layer.provide(migration),
+  )
+  const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
+  // The engine reads the connection settings from Settings when the layer is built.
+  const streams = StreamManagerLive.pipe(
+    Layer.provide(TorrentServiceLive.pipe(Layer.provide(WebTorrentEngineLive))),
+  )
+
+  const core = Layer.mergeAll(settings, database, sqlite, LocalFilesLive)
+  const runtime = ManagedRuntime.make(Layer.mergeAll(core, streams.pipe(Layer.provide(core))))
 
   const settingsService = await runtime.runPromise(SettingsService)
   const snapshot = await runtime.runPromise(

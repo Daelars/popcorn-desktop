@@ -31,6 +31,11 @@ export class DeviceError extends Data.TaggedError('DeviceError')<
   ErrorFields & { readonly device: string; readonly operation: string }
 > {}
 
+/** A one-time legacy migration that failed; startup recovers and continues empty. */
+export class MigrationError extends Data.TaggedError('MigrationError')<
+  ErrorFields & { readonly operation: string }
+> {}
+
 export class SettingsError extends Data.TaggedError('SettingsError')<
   ErrorFields & { readonly key: string }
 > {}
@@ -41,4 +46,5 @@ export type ServiceError =
   | SubtitleError
   | DbError
   | DeviceError
+  | MigrationError
   | SettingsError

@@ -40,6 +40,8 @@ describe('tagged errors', () => {
           return `db/${error.operation}: ${error.message}`
         case 'DeviceError':
           return `${error.device}/${error.operation}: ${error.message}`
+        case 'MigrationError':
+          return `migration/${error.operation}: ${error.message}`
         case 'SettingsError':
           return `${error.key}: ${error.message}`
       }
