@@ -1,0 +1,92 @@
+@import "tailwindcss";
+@import "@fortawesome/fontawesome-free/css/all.min.css";
+@import "../../../resources/themes/index.css";
+/* `views.css` is imported from `main.tsx` instead: Tailwind's CSS pipeline rewrites the
+   legacy escape sequences (`content: '\f002'`) into empty strings, which loses the FA
+   glyphs on pseudo-elements (the search magnifier, the player's controls). */
+
+/* The legacy app sets the font on a container we no longer render; apply the token at the root. */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--Font), sans-serif;
+}
+
+.titlebar,
+.windows-titlebar {
+  -webkit-app-region: drag;
+}
+
+.titlebar button,
+.windows-titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * The legacy stylesheet floats the filter-bar groups and expects anchors; the shell lays
+ * them out with flex instead so the bar stays a single 35px row.
+ */
+.filter-bar {
+  display: flex;
+  align-items: center;
+}
+
+.filter-bar .nav,
+.filter-bar .nav.filters,
+.filter-bar .nav.right {
+  float: none;
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.filter-bar .nav.filters {
+  margin-left: 10px;
+}
+
+.filter-bar .nav.right {
+  margin-left: auto;
+  margin-right: 5px;
+}
+
+.filter-bar .filter {
+  padding: 0;
+}
+
+.filter-bar .filter > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  color: var(--FilterBarText);
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.filter-bar .filter > button:hover {
+  color: var(--FilterBarTextHover);
+}
+
+.filter-bar .source {
+  padding: 0 12px;
+}
+
+.filter-bar .source a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.filter-bar .nav.right a {
+  display: inline-flex;
+  align-items: center;
+  color: var(--FilterBarText);
+}
+
+.filter-bar .nav.right a:hover {
+  color: var(--FilterBarTextHover);
+}

@@ -1,0 +1,18 @@
+# `videojs-youtube` pulls an old video.js peer whose `vtt.js` lives in a git repository,
+# and pnpm's strict peer resolution rejects the pair; both stay off for this repo.
+strictPeerDependencies: false
+blockExoticSubdeps: false
+
+allowBuilds:
+  electron: true
+  esbuild: true
+  better-sqlite3: true
+  # webtorrent's optional native accelerators stay off: pure-JS fallbacks are used.
+  # WebRTC datachannel backend for webtorrent; N-API prebuilds, so no toolchain needed.
+  node-datachannel: true
+  bufferutil: false
+  ip-set: false
+  utf-8-validate: false
+  utp-native: false
+  # Only the nsis target is used, so Squirrel.Windows never runs its installer script.
+  electron-winstaller: false

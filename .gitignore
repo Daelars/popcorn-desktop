@@ -1,11 +1,9 @@
 # build files
 node_modules/
+out/
+release/
 src/app/themes
-build/
 cache/
-dist/windows/*-Setup.exe
-dist/linux/linux-installer
-dist/linux/*.deb
 src/app/css/app.css
 *git.json
 
