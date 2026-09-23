@@ -329,7 +329,7 @@ export class TpbBrowseApi extends BaseProvider<Movie> {
   }> {
     return {
       genres: { All: 'All' },
-      sorters: { Trending: 'seeds', Size: 'size', Uploaded: 'added' },
+      sorters: { seeds: 'Trending', size: 'Size', added: 'Uploaded' },
     }
   }
 }
