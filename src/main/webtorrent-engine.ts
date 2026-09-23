@@ -2,6 +2,7 @@ import { Effect, Layer, Stream } from 'effect'
 import type WebTorrent from 'webtorrent'
 import type { WebTorrentTorrent } from 'webtorrent'
 import { TorrentError } from '../shared/errors'
+import type { Settings } from '../shared/settings'
 import { DEFAULT_TRACKERS, SettingsService } from './settings'
 import {
   TorrentEngine,
@@ -179,6 +180,26 @@ export interface WebTorrentOptions {
   readonly announce?: ReadonlyArray<string>
 }
 
+/** The runtime-tunable limits, applied to the running client from settings changes. */
+export interface LiveLimits {
+  readonly maxConns: number
+  readonly downloadLimit: number
+  readonly uploadLimit: number
+}
+
+/**
+ * The limits that can change while the client runs. `maxConns` and the speed limits are
+ * runtime properties in webtorrent; DHT concurrency and protocol encryption are constructor
+ * options and still need a restart, which is why the metadata marks the latter `restart`.
+ */
+export function liveLimits(snapshot: Settings): LiveLimits {
+  return {
+    maxConns: snapshot.connectionLimit,
+    downloadLimit: Number.parseFloat(snapshot.downloadLimit) * snapshot.maxLimitMult || -1,
+    uploadLimit: Number.parseFloat(snapshot.uploadLimit) * snapshot.maxLimitMult || -1,
+  }
+}
+
 /**
  * Real engine: one webtorrent client for the process, torn down with the layer's scope. It
  * reads its connection options from `Settings` when the layer is built, so migration runs
@@ -219,6 +240,19 @@ export const WebTorrentEngineLive = Layer.scoped(
         Effect.async<void>((resume) => {
           instance.destroy(() => resume(Effect.void))
         }),
+    )
+    // Live apply: connection and speed limit changes reach the running client in one tick.
+    yield* settings.changes.pipe(
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          const current = yield* settings.snapshot
+          const limits = liveLimits(current)
+          client.maxConns = limits.maxConns
+          client.throttleDownload(limits.downloadLimit)
+          client.throttleUpload(limits.uploadLimit)
+        }),
+      ),
+      Effect.forkScoped,
     )
     return TorrentEngine.of({
       load: (torrentId, downloadPath) => load(client, torrentId, downloadPath),
