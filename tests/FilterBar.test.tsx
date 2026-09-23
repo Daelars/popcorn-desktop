@@ -52,6 +52,12 @@ it('reports genre, sorter and search changes through the legacy dropdowns', () =
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ keywords: 'dune', genre: '' }))
 })
 
+it('shows the label for the selected sort key', () => {
+  renderBar()
+  // The dropdown displays the label ("Trending"), not the raw key ("trending").
+  expect(screen.getByLabelText('Sort by').querySelector('.value')?.textContent).toBe('Trending')
+})
+
 it('shows the type and rating dropdowns only for providers that support them', () => {
   renderBar()
   expect(screen.queryByLabelText('Type')).not.toBeInTheDocument()

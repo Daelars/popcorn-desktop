@@ -130,17 +130,28 @@ export class TmdbBrowseApi extends BaseProvider<Movie> {
   }
 
   async fetch(filters: Filters): Promise<ProviderPage<Movie>> {
-    const params: Record<string, string> = {
-      page: String(Math.max(1, filters.page ?? 1)),
-      sort_by: this.sorter(filters.sorter),
+    const pageNumber = Math.max(1, filters.page ?? 1)
+    const keywords = filters.keywords?.trim() ?? ''
+    // The search box drives the search endpoint; discover has no query parameter.
+    let page: TmdbPage
+    if (keywords !== '') {
+      page = await tmdbJson<TmdbPage>(`/search/${this.kind}`, this.tmdbKey, {
+        page: String(pageNumber),
+        query: keywords,
+      })
+    } else {
+      const params: Record<string, string> = {
+        page: String(pageNumber),
+        sort_by: this.sorter(filters.sorter),
+      }
+      if (this.config.type === 'anime') {
+        params.with_genres = '16'
+        params.with_origin_country = 'JP'
+      } else if (filters.genre !== undefined && filters.genre !== '' && filters.genre !== 'All') {
+        params.with_genres = filters.genre
+      }
+      page = await tmdbJson<TmdbPage>(`/discover/${this.kind}`, this.tmdbKey, params)
     }
-    if (this.config.type === 'anime') {
-      params.with_genres = '16'
-      params.with_origin_country = 'JP'
-    } else if (filters.genre !== undefined && filters.genre !== '' && filters.genre !== 'All') {
-      params.with_genres = filters.genre
-    }
-    const page = await tmdbJson<TmdbPage>(`/discover/${this.kind}`, this.tmdbKey, params)
     const genres = await genresFor(this.kind, this.tmdbKey)
     const results = page.results ?? []
 
@@ -240,7 +251,7 @@ export class TmdbBrowseApi extends BaseProvider<Movie> {
         All: 'All',
         ...Object.fromEntries([...genres].map(([id, name]) => [String(id), name])),
       },
-      sorters: { Trending: 'popularity', Rating: 'rating', Newest: 'year' },
+      sorters: { popularity: 'Trending', rating: 'Rating', year: 'Newest' },
     }
   }
 }

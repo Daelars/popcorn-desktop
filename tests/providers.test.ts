@@ -1,7 +1,9 @@
 import { Schema } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MovieApi } from '../src/main/providers/movie'
+import { TpbBrowseApi } from '../src/main/providers/piratebay'
 import { createRegistry } from '../src/main/providers/registry'
+import { TmdbBrowseApi } from '../src/main/providers/tmdb'
 import { YtsApi } from '../src/main/providers/yts'
 import { Movie } from '../src/shared'
 
@@ -119,5 +121,119 @@ describe('registry', () => {
       contentLangOnly: false,
     })
     expect(entries.map((entry) => entry.id)).toEqual(['movies', 'tpbtv', 'anime'])
+  })
+})
+
+describe('TmdbBrowseApi', () => {
+  const config = {
+    name: 'TmdbMovies',
+    uniqueId: 'imdb_id',
+    tabName: 'Movies',
+    type: 'movie',
+  } as const
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  function stubFetch(): string[] {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      urls.push(url)
+      return {
+        ok: true,
+        json: async () =>
+          url.includes('/genre/') ? { genres: [] } : { page: 1, total_pages: 1, results: [] },
+      }
+    })
+    return urls
+  }
+
+  it('maps sort keys to labels and sends the key as sort_by', async () => {
+    const urls = stubFetch()
+    const provider = new TmdbBrowseApi(config, { tmdbKey: 'key' })
+
+    expect((await provider.formatFilters()).sorters).toEqual({
+      popularity: 'Trending',
+      rating: 'Rating',
+      year: 'Newest',
+    })
+
+    await provider.fetch({ page: 1, sorter: 'rating' })
+    expect(urls.some((url) => url.includes('sort_by=vote_average.desc'))).toBe(true)
+
+    await provider.fetch({ page: 1, sorter: 'year' })
+    expect(urls.some((url) => url.includes('sort_by=primary_release_date.desc'))).toBe(true)
+  })
+
+  it('uses the search endpoint for keywords and pages it like browse', async () => {
+    const urls = stubFetch()
+    const provider = new TmdbBrowseApi(config, { tmdbKey: 'key' })
+
+    const result = await provider.fetch({ page: 2, keywords: 'dune' })
+
+    const search = urls.find((url) => url.includes('/search/movie'))
+    expect(search).toBeDefined()
+    expect(search).toContain('query=dune')
+    expect(search).toContain('page=2')
+    expect(result.hasMore).toBe(false)
+  })
+})
+
+describe('TpbBrowseApi', () => {
+  const items = [
+    {
+      id: 1,
+      info_hash: 'a'.repeat(40),
+      name: 'Alpha 2019 1080p',
+      seeders: 5,
+      leechers: 1,
+      size: 3_000_000_000,
+      added: 100,
+      imdb: 'tt1111111',
+      category: 200,
+    },
+    {
+      id: 2,
+      info_hash: 'b'.repeat(40),
+      name: 'Beta 2020 1080p',
+      seeders: 1,
+      leechers: 1,
+      size: 1_000,
+      added: 200,
+      imdb: 'tt2222222',
+      category: 200,
+    },
+  ]
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  function provider(): TpbBrowseApi {
+    vi.stubGlobal('fetch', async () => ({ ok: true, json: async () => items }))
+    return new TpbBrowseApi({
+      name: 'TPBBrowse',
+      uniqueId: 'imdb_id',
+      tabName: 'Movies',
+      type: 'movie',
+    })
+  }
+
+  it('maps sort keys to labels', async () => {
+    expect((await provider().formatFilters()).sorters).toEqual({
+      seeds: 'Trending',
+      size: 'Size',
+      added: 'Uploaded',
+    })
+  })
+
+  it('orders by seeds, size and added from the chosen key', async () => {
+    const browse = provider()
+    const titles = async (sorter?: string) =>
+      (await browse.fetch({ page: 1, ...(sorter === undefined ? {} : { sorter }) })).results.map(
+        (movie) => movie.title,
+      )
+
+    expect(await titles()).toEqual(['Alpha 2019 1080p', 'Beta 2020 1080p'])
+    expect(await titles('size')).toEqual(['Alpha 2019 1080p', 'Beta 2020 1080p'])
+    expect(await titles('added')).toEqual(['Beta 2020 1080p', 'Alpha 2019 1080p'])
   })
 })

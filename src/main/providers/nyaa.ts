@@ -71,7 +71,7 @@ export class NyaaAnimeApi extends BaseProvider<Movie> {
     genres: Record<string, string>
     sorters: Record<string, string>
   }> {
-    return { genres: { All: 'All' }, sorters: { Trending: 'seeds' } }
+    return { genres: { All: 'All' }, sorters: { seeds: 'Trending' } }
   }
 }
 
