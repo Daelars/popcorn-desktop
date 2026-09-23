@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router'
 import { Show } from '../../../shared'
+import { popcorn } from '../bridge'
 import { ExternalPlayerPanel } from '../components/ExternalPlayerPanel'
 import { LoadingScreen } from '../components/LoadingScreen'
 import {
@@ -56,8 +57,7 @@ export function PlayerPage() {
     queryKey: ['player-show', params.get('imdbId') ?? ''],
     enabled: params.get('tvdbId') !== null && params.get('imdbId') !== null,
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return undefined
+      const bridge = popcorn()
       const raw = await bridge.invoke('media:getShow', { imdbId: params.get('imdbId') ?? '' })
       // The cache returns undefined for a show that was never browsed; the schema guards
       // against a malformed entry.
@@ -108,8 +108,7 @@ export function PlayerPage() {
   }
 
   useEffect(() => {
-    const bridge = window.popcorn
-    if (bridge === undefined) return
+    const bridge = popcorn()
     if (source === '' && localPath === '') return
     // A local file always plays in the built-in player; torrents respect the chosen player.
     if (chosenPlayer !== 'local' && localPath === '') return

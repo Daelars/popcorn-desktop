@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { Episode, Show, Torrent } from '../../../shared'
+import { popcorn } from '../bridge'
 import { failureText } from '../failure'
 import { useToggleWatchedEpisode, useWatchedEpisodes } from '../library'
 import { notify } from '../notify'
@@ -36,8 +37,7 @@ export function ShowDetail({ show }: { show: Show }) {
   const subtitleList = useQuery({
     queryKey: ['subtitles', show.imdb_id],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return {}
+      const bridge = popcorn()
       const { subtitles } = await bridge.invoke('subtitles:list', { imdbId: show.imdb_id })
       return subtitles
     },
@@ -81,8 +81,8 @@ export function ShowDetail({ show }: { show: Show }) {
   /** `show_detail.js:downloadTorrent`: start the stream and surface it in the seedbox. */
   const download = () => {
     if (chosen === undefined) return
-    void window.popcorn
-      ?.invoke('stream:start', {
+    void popcorn()
+      .invoke('stream:start', {
         torrentId: chosen[1].url,
         fileIndex: 0,
         origin: window.location.origin,
@@ -329,7 +329,7 @@ export function ShowDetail({ show }: { show: Show }) {
                       className="fa fa-download item-download"
                       aria-label={t('Download')}
                       onClick={() =>
-                        void window.popcorn?.invoke('collection:add', {
+                        void popcorn().invoke('collection:add', {
                           name:
                             torrent.title ?? (selected === undefined ? '' : episodeLabel(selected)),
                           source: torrent.url,

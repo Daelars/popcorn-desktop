@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
+import { popcorn } from '../bridge'
 import { useSettings } from '../settings'
 import { markManualCheck } from '../updates'
 
@@ -23,8 +24,7 @@ export function AboutPage() {
 
   // The prompt itself lives in the shell (`UpdatePrompt`); this only spins the icon.
   useEffect(() => {
-    const bridge = window.popcorn
-    if (bridge === undefined) return
+    const bridge = popcorn()
     return bridge.onUpdateStatus((status) => {
       setChecking(status.state === 'checking')
     })
@@ -33,7 +33,9 @@ export function AboutPage() {
   const checkForUpdates = () => {
     markManualCheck()
     setChecking(true)
-    void window.popcorn?.invoke('updates:check', { manual: true }).catch(() => setChecking(false))
+    void popcorn()
+      .invoke('updates:check', { manual: true })
+      .catch(() => setChecking(false))
   }
 
   const social = [

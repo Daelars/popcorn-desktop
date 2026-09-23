@@ -1,7 +1,10 @@
 import { useTranslation } from 'react-i18next'
+import { popcorn } from '../bridge'
 
 function control(channel: 'window:minimize' | 'window:maximize' | 'window:close'): void {
-  void window.popcorn?.invoke(channel, {}).catch(() => undefined)
+  void popcorn()
+    .invoke(channel, {})
+    .catch(() => undefined)
 }
 
 /**
@@ -38,7 +41,9 @@ export function HeaderBar() {
           className="btn-os fullscreen"
           aria-label={t('Toggle Fullscreen')}
           onClick={() => {
-            void window.popcorn?.invoke('window:maximize', {}).catch(() => undefined)
+            void popcorn()
+              .invoke('window:maximize', {})
+              .catch(() => undefined)
           }}
         />
       </nav>

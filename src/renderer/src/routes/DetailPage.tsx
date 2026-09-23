@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Schema } from 'effect'
 import { useParams } from 'react-router'
 import { Movie, Show } from '../../../shared'
+import { popcorn } from '../bridge'
 import { MovieDetail } from '../components/MovieDetail'
 import { ShowDetail } from '../components/ShowDetail'
 import { getCachedMedia } from '../library'
@@ -23,8 +24,8 @@ export function DetailPage() {
     enabled: cached !== undefined,
     retry: false,
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined || cached === undefined) return undefined
+      const bridge = popcorn()
+      if (cached === undefined) return undefined
       const raw = await bridge.invoke('media:resolve', {
         type: cached.type === 'movie' ? 'movie' : 'tvshow',
         imdbId: cached.imdb_id,

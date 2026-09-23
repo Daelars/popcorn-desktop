@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IpcResponse } from '../../../shared/ipc'
+import { popcorn } from '../bridge'
 import { notify } from '../notify'
 import { useSetting } from '../settings'
 
@@ -33,8 +34,7 @@ export function PlayerChooser({ onWatch }: { readonly onWatch: () => void }) {
   const players = useQuery({
     queryKey: ['players'],
     queryFn: async (): Promise<ReadonlyArray<ExternalPlayer>> => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return []
+      const bridge = popcorn()
       return bridge.invoke('players:list', {})
     },
   })
@@ -51,7 +51,7 @@ export function PlayerChooser({ onWatch }: { readonly onWatch: () => void }) {
   if (selected === undefined) return null
 
   const choose = (id: string) => {
-    void window.popcorn?.invoke('settings:set', { key: 'chosenPlayer', value: id })
+    void popcorn().invoke('settings:set', { key: 'chosenPlayer', value: id })
     setOpen(false)
   }
 

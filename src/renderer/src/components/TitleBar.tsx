@@ -1,8 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import iconUrl from '../assets/icon.png'
+import { popcorn } from '../bridge'
 
 function control(channel: 'window:minimize' | 'window:maximize' | 'window:close'): void {
-  void window.popcorn?.invoke(channel, {}).catch(() => undefined)
+  void popcorn()
+    .invoke(channel, {})
+    .catch(() => undefined)
 }
 
 /** The legacy Windows titlebar: icon, title, events indicator, window controls. */
