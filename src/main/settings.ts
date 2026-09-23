@@ -1,5 +1,5 @@
 ﻿import { join } from 'node:path'
-import { Context, Effect, Layer, Option, Ref, Schema } from 'effect'
+import { Context, Effect, Layer, Option, PubSub, Ref, Schema, Stream } from 'effect'
 import { SettingsError } from '../shared/errors'
 import { type Settings, SettingsFields, type SettingsKey } from '../shared/settings'
 import { LegacyMigration } from './legacy-migration'
@@ -238,6 +238,14 @@ export interface SettingsServiceShape {
   readonly read: (key: string) => Effect.Effect<unknown, SettingsError>
   readonly set: (key: string, value: unknown) => Effect.Effect<void, SettingsError>
   readonly snapshot: Effect.Effect<Settings>
+  /** One entry per accepted write, so consumers react live instead of reading a boot snapshot. */
+  readonly changes: Stream.Stream<SettingsChange>
+}
+
+/** A published settings write: the key and its decoded value. */
+export interface SettingsChange {
+  readonly key: string
+  readonly value: unknown
 }
 
 export class SettingsService extends Context.Tag('SettingsService')<
@@ -281,6 +289,7 @@ export function SettingsServiceLive(environment: SettingsEnvironment) {
       const store = yield* SettingsStore
       const persisted = yield* store.read
       const state = yield* Ref.make(withPersisted(settingsDefaults(environment), persisted))
+      const changes = yield* PubSub.unbounded<SettingsChange>()
 
       const get: SettingsServiceShape['get'] = (key) =>
         Effect.map(Ref.get(state), (settings) => settings[key])
@@ -306,9 +315,16 @@ export function SettingsServiceLive(environment: SettingsEnvironment) {
           )
           yield* store.write(key, decoded)
           yield* Ref.update(state, (settings) => ({ ...settings, [key]: decoded }) as Settings)
+          yield* PubSub.publish(changes, { key, value: decoded })
         })
 
-      return SettingsService.of({ get, read, set, snapshot: Ref.get(state) })
+      return SettingsService.of({
+        get,
+        read,
+        set,
+        snapshot: Ref.get(state),
+        changes: Stream.fromPubSub(changes),
+      })
     }),
   )
 }

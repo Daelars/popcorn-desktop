@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { Effect, Exit, Layer, ManagedRuntime } from 'effect'
+import { Effect, Exit, Fiber, Layer, ManagedRuntime, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { LegacyMigration } from '../src/main/legacy-migration'
 import { NOT_MIGRATED } from '../src/main/migration'
@@ -12,6 +12,7 @@ import {
   settingsDefaults,
 } from '../src/main/settings'
 import { SettingsError } from '../src/shared/errors'
+import { INERT_SETTINGS, SETTINGS_METADATA } from '../src/shared/settings-metadata'
 
 const environment: SettingsEnvironment = {
   tempDir: 'C:/tmp',
@@ -121,6 +122,16 @@ describe('settings defaults', () => {
   })
 })
 
+describe('settings metadata', () => {
+  it('declares a consumer or an inert reason for every key', () => {
+    const keys = Object.keys(SETTINGS_METADATA)
+    expect(keys.length).toBeGreaterThan(100)
+    for (const key of INERT_SETTINGS) {
+      expect(SETTINGS_METADATA[key as keyof typeof SETTINGS_METADATA].inertReason).toBeDefined()
+    }
+  })
+})
+
 describe('SettingsService', () => {
   it('reads defaults before anything is set', async () => {
     const theme = await run(Effect.flatMap(SettingsService, (settings) => settings.get('theme')))
@@ -200,6 +211,23 @@ describe('SettingsService', () => {
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
       expect(exit.cause.toString()).toContain('SettingsError')
+    }
+  })
+
+  it('publishes a change when a setting is set', async () => {
+    const { run } = makeRun()
+    const change = await run(
+      Effect.gen(function* () {
+        const settings = yield* SettingsService
+        const fiber = yield* Effect.fork(Stream.runHead(settings.changes))
+        yield* Effect.sleep('10 millis')
+        yield* settings.set('theme', 'Official_-_Light_theme')
+        return yield* Fiber.join(fiber)
+      }),
+    )
+    expect(change._tag).toBe('Some')
+    if (change._tag === 'Some') {
+      expect(change.value).toEqual({ key: 'theme', value: 'Official_-_Light_theme' })
     }
   })
 })
