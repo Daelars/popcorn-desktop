@@ -1,7 +1,8 @@
-﻿import { useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router'
+import { popcorn } from '../bridge'
 import { failureText } from '../failure'
 
 function formatSize(bytes: number): string {
@@ -23,8 +24,7 @@ export function FileSelectorPage() {
   const files = useQuery({
     queryKey: ['streamFiles', source],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return { infoHash: '', files: [] }
+      const bridge = popcorn()
       return bridge.invoke('stream:files', { torrentId: source })
     },
     enabled: source !== '',

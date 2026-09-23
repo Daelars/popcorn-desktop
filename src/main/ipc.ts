@@ -12,6 +12,7 @@ import {
   contracts,
   type IpcChannel,
   type IpcEnvelope,
+  type IpcEvent,
   type IpcEventPayload,
   toIpcFailure,
 } from '../shared/ipc'
@@ -495,11 +496,11 @@ export function registerIpc<R, ER>(
   }
 }
 
-/** Publishes push events (streaming progress) to a window; the renderer subscribes. */
-export function createEventPublisher(send: (channel: string, payload: unknown) => void) {
+/** Publishes push events to the renderer; the renderer subscribes. The only send path. */
+export function createEventPublisher(send: (channel: IpcEvent, payload: unknown) => void) {
   return {
-    publishProgress: (payload: IpcEventPayload<'streams:progress'>) => {
-      send('streams:progress', payload)
+    publish: <K extends IpcEvent>(channel: K, payload: IpcEventPayload<K>) => {
+      send(channel, payload)
     },
   }
 }

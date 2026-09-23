@@ -3,6 +3,7 @@ import { Download, HardDrive, Pause, Play, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IpcResponse } from '../../../shared/ipc'
+import { popcorn } from '../bridge'
 
 type TorrentSummary = IpcResponse<'torrents:list'>[number]
 
@@ -22,8 +23,7 @@ export function SeedboxPage() {
   const torrents = useQuery({
     queryKey: ['torrents'],
     queryFn: async (): Promise<ReadonlyArray<TorrentSummary>> => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return []
+      const bridge = popcorn()
       return bridge.invoke('torrents:list', {})
     },
     refetchInterval: 1000,
@@ -37,7 +37,7 @@ export function SeedboxPage() {
       action: 'torrents:pause' | 'torrents:resume' | 'torrents:remove'
       infoHash: string
     }) => {
-      await window.popcorn?.invoke(action, { infoHash })
+      await popcorn().invoke(action, { infoHash })
     },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['torrents'] })

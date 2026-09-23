@@ -58,7 +58,14 @@ export function createBridge(transport: IpcTransport): PopcornBridge {
       listener(Schema.decodeUnknownSync(events['updates:status'])(payload))
     })
 
-  return { invoke, onProgress, onOpenFile, onUpdateStatus, pathForFile: transport.pathForFile }
+  // The overloads type settings per key; one implementation cannot express all of them.
+  return {
+    invoke: invoke as PopcornBridge['invoke'],
+    onProgress,
+    onOpenFile,
+    onUpdateStatus,
+    pathForFile: transport.pathForFile,
+  }
 }
 
 export type { IpcEvent }

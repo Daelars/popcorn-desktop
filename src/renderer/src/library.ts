@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Schema } from 'effect'
 import { MediaItem } from '../../shared'
+import { popcorn } from './bridge'
 import type { BrowseItem } from './browse'
 import type { LibraryState } from './components/Poster'
 
@@ -9,10 +10,7 @@ export function useLibraryState() {
   return useQuery({
     queryKey: ['library'],
     queryFn: async (): Promise<ReadonlyMap<string, LibraryState>> => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       const [bookmarks, watched] = await Promise.all([
         bridge.invoke('bookmarks:list', {}),
         bridge.invoke('watched:movies', {}),
@@ -31,10 +29,7 @@ export function useLibraryState() {
 }
 
 export async function getCachedMedia(imdbId: string): Promise<BrowseItem | undefined> {
-  const bridge = window.popcorn
-  if (bridge === undefined) {
-    throw new Error('IPC bridge unavailable')
-  }
+  const bridge = popcorn()
   const movie = await bridge.invoke('media:getMovie', { imdbId })
   const show = movie === undefined ? await bridge.invoke('media:getShow', { imdbId }) : undefined
   const raw = movie ?? show
@@ -53,10 +48,7 @@ export function useWatchedEpisodes(tvdbId: number) {
   return useQuery({
     queryKey: ['watched-episodes', tvdbId],
     queryFn: async (): Promise<ReadonlySet<string>> => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       const episodes = await bridge.invoke('watched:episodes', { tvdbId: String(tvdbId) })
       return new Set(episodes.map((episode) => `${episode.season}:${episode.episode}`))
     },
@@ -67,10 +59,7 @@ export function useToggleWatchedMovie() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async ({ imdbId, watched }: { imdbId: string; watched: boolean }) => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       if (watched) await bridge.invoke('watched:unmarkMovie', { imdbId })
       else await bridge.invoke('watched:markMovie', { imdbId })
     },
@@ -97,10 +86,7 @@ export function useToggleWatchedEpisode() {
       episode: string
       watched: boolean
     }) => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       const ref = { tvdbId, imdbId, season, episode }
       if (watched) await bridge.invoke('watched:unmarkEpisode', ref)
       else await bridge.invoke('watched:markEpisode', ref)
@@ -117,10 +103,7 @@ export function useFavoriteItems() {
   return useQuery({
     queryKey: ['favorites'],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       const bookmarks = await bridge.invoke('bookmarks:list', {})
       return cachedItems(bookmarks.map((bookmark) => bookmark.imdbId))
     },
@@ -132,10 +115,7 @@ export function useWatchedItems() {
   return useQuery({
     queryKey: ['watched'],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       return cachedItems(await bridge.invoke('watched:movies', {}))
     },
   })
@@ -145,10 +125,7 @@ export function useToggleBookmark() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: async (item: BrowseItem) => {
-      const bridge = window.popcorn
-      if (bridge === undefined) {
-        throw new Error('IPC bridge unavailable')
-      }
+      const bridge = popcorn()
       const bookmarked = await bridge.invoke('bookmarks:list', {})
       const exists = bookmarked.some((bookmark) => bookmark.imdbId === item.imdb_id)
       if (exists) {

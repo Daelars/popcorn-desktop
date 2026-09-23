@@ -1,9 +1,10 @@
-﻿import { useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import placeholder from '../../../../resources/images/posterholder.png'
 import type { Movie, Torrent } from '../../../shared'
+import { popcorn } from '../bridge'
 import { failureText } from '../failure'
 import { useLibraryState, useToggleBookmark, useToggleWatchedMovie } from '../library'
 import { notify } from '../notify'
@@ -44,8 +45,7 @@ export function MovieDetail({ movie }: { movie: Movie }) {
   const subtitleList = useQuery({
     queryKey: ['subtitles', movie.imdb_id],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return {}
+      const bridge = popcorn()
       const { subtitles } = await bridge.invoke('subtitles:list', { imdbId: movie.imdb_id })
       return subtitles
     },
@@ -80,8 +80,8 @@ export function MovieDetail({ movie }: { movie: Movie }) {
   /** `play_control.js:downloadTorrent`: start the stream and surface it in the seedbox. */
   const download = () => {
     if (selected === undefined) return
-    void window.popcorn
-      ?.invoke('stream:start', {
+    void popcorn()
+      .invoke('stream:start', {
         torrentId: selected[1].url,
         fileIndex: 0,
         origin: window.location.origin,
@@ -199,7 +199,7 @@ export function MovieDetail({ movie }: { movie: Movie }) {
                       className="fa fa-download item-download"
                       aria-label={t('Download')}
                       onClick={() =>
-                        void window.popcorn?.invoke('collection:add', {
+                        void popcorn().invoke('collection:add', {
                           name: torrent.title ?? movie.title,
                           source: torrent.url,
                         })
