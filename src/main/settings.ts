@@ -2,6 +2,7 @@
 import { Context, Effect, Layer, Option, Ref, Schema } from 'effect'
 import { SettingsError } from '../shared/errors'
 import { type Settings, SettingsFields, type SettingsKey } from '../shared/settings'
+import { LegacyMigration } from './legacy-migration'
 
 /** Everything the defaults need from the outside world, so tests can run without Electron. */
 export interface SettingsEnvironment {
@@ -270,6 +271,8 @@ export function SettingsServiceLive(environment: SettingsEnvironment) {
   return Layer.effect(
     SettingsService,
     Effect.gen(function* () {
+      // Migration depends here, so the Layer graph runs it before any setting is read.
+      yield* LegacyMigration
       const store = yield* SettingsStore
       const persisted = yield* store.read
       const state = yield* Ref.make(withPersisted(settingsDefaults(environment), persisted))
