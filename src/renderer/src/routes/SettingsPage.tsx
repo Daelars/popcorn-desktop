@@ -311,7 +311,7 @@ function Row({
           {t(hint)}
         </em>
       )}
-      {restart === true ? <em>{t('Please restart your application')}</em> : null}
+      {restart === true ? <em>&nbsp;&nbsp;&nbsp;{t('Please restart your application')}</em> : null}
     </span>
   )
 }
