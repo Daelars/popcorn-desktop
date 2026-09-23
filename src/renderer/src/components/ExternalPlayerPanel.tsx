@@ -1,9 +1,11 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ExternalLink, X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { IpcResponse } from '../../../shared/ipc'
+import { failureText } from '../failure'
+import { notify } from '../notify'
 
 type ExternalPlayer = IpcResponse<'players:list'>[number]
 
@@ -11,17 +13,26 @@ interface ExternalPlayerPanelProps {
   readonly source: string
   readonly title: string
   readonly fileIndex: number
+  /** The player chosen in the chooser; when it is installed it starts immediately. */
+  readonly playerId?: string
 }
 
 /**
  * The legacy "streaming to an external player" flow: start the loopback stream, hand its
- * URL to the chosen player, and keep the torrent alive until the user stops it.
+ * URL to the chosen player, and keep the torrent alive until the user stops it. The main
+ * process stops the session itself when the player exits.
  */
-export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayerPanelProps) {
+export function ExternalPlayerPanel({
+  source,
+  title,
+  fileIndex,
+  playerId,
+}: ExternalPlayerPanelProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [streamingTo, setStreamingTo] = useState<string>()
   const sessionPort = useRef<number | undefined>(undefined)
+  const autoStarted = useRef(false)
 
   const players = useQuery({
     queryKey: ['players'],
@@ -31,6 +42,14 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
       return bridge.invoke('players:list', {})
     },
   })
+
+  const stopSession = () => {
+    const port = sessionPort.current
+    sessionPort.current = undefined
+    if (port !== undefined) {
+      void window.popcorn?.invoke('stream:stop', { port })
+    }
+  }
 
   const play = useMutation({
     mutationFn: async (player: ExternalPlayer) => {
@@ -42,19 +61,29 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
         origin: window.location.origin,
       })
       sessionPort.current = session.port
-      await bridge.invoke('players:play', { playerId: player.id, url: session.url, title })
+      await bridge.invoke('players:play', {
+        playerId: player.id,
+        url: session.url,
+        title,
+        // Main stops this port when the player exits.
+        port: session.port,
+      })
       setStreamingTo(player.id)
+    },
+    onError: (error) => {
+      stopSession()
+      notify(failureText(error))
     },
   })
 
-  const stop = () => {
-    const port = sessionPort.current
-    sessionPort.current = undefined
-    if (port !== undefined) {
-      void window.popcorn?.invoke('stream:stop', { port })
-    }
-    setStreamingTo(undefined)
-  }
+  // A chooser selection launches directly; the generic `extplayer` id falls through to the list.
+  useEffect(() => {
+    if (autoStarted.current || playerId === undefined) return
+    const match = (players.data ?? []).find((candidate) => candidate.id === playerId)
+    if (match === undefined) return
+    autoStarted.current = true
+    play.mutate(match)
+  }, [players.data, playerId, play])
 
   const list = players.data ?? []
 
@@ -66,7 +95,7 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
         className="close-icon"
         aria-label={t('Close')}
         onClick={() => {
-          stop()
+          stopSession()
           navigate(-1)
         }}
       >
@@ -94,7 +123,7 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
                 {t('Streaming to')} <span className="player-name">{streamingTo}</span>
               </div>
               <div id="cancel-button" className="cancel-button button">
-                <button type="button" className="cancel-button-text" onClick={stop}>
+                <button type="button" className="cancel-button-text" onClick={stopSession}>
                   {t('Cancel')}
                 </button>
               </div>

@@ -84,7 +84,9 @@ beforeAll(async () => {
 const source = 'magnet:?xt=urn:btih:abc'
 const title = 'The Shawshank Redemption'
 
-function stubBridge(options: { show?: unknown; settings?: Record<string, unknown> } = {}) {
+function stubBridge(
+  options: { show?: unknown; settings?: Record<string, unknown>; players?: unknown } = {},
+) {
   const calls: Array<{ channel: string; payload: unknown }> = []
   const bridge = {
     invoke: async (channel: string, payload: unknown) => {
@@ -96,6 +98,8 @@ function stubBridge(options: { show?: unknown; settings?: Record<string, unknown
           return options.show
         case 'settings:all':
           return options.settings ?? {}
+        case 'players:list':
+          return options.players ?? []
         default:
           return undefined
       }
@@ -131,6 +135,25 @@ it('starts the stream and renders the legacy player markup', async () => {
   expect(screen.getAllByText(title).length).toBeGreaterThan(0)
   const start = calls.find((call) => call.channel === 'stream:start')
   expect(start?.payload).toMatchObject({ torrentId: source, fileIndex: 0 })
+})
+
+it('starts the stream and shows the external panel for a chosen external player', async () => {
+  const calls = stubBridge({
+    settings: { chosenPlayer: 'VLC' },
+    players: [{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }],
+  })
+  renderPlayer()
+
+  await waitFor(() => {
+    expect(document.querySelector('.player-name')?.textContent).toBe('VLC')
+  })
+  const start = calls.find((call) => call.channel === 'stream:start')
+  expect(start?.payload).toMatchObject({ torrentId: source, fileIndex: 0 })
+  expect(calls.find((call) => call.channel === 'players:play')?.payload).toMatchObject({
+    playerId: 'VLC',
+    url: 'http://127.0.0.1:41000/0',
+    port: 41000,
+  })
 })
 
 it('renders the A-/A+ buttons from the legacy subtitle plugins', async () => {

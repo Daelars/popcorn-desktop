@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path'
 import { Cause, Chunk, Effect, Exit, Schema } from 'effect'
 import {
   DbError,
+  type DeviceError,
   ProviderError,
   type SettingsError,
   type SubtitleError,
@@ -56,7 +57,8 @@ export interface ExternalPlayersPort {
     readonly subtitle?: string
     readonly title?: string
     readonly fullscreen?: boolean
-  }) => Effect.Effect<void>
+    readonly port?: number
+  }) => Effect.Effect<void, DeviceError>
 }
 
 /** Native file pickers and shell actions; faked in tests so the flows run headless. */
@@ -82,13 +84,18 @@ export interface EffectRunner {
   readonly runPromiseExit: <A>(
     effect: Effect.Effect<
       A,
-      SettingsError | DbError | ProviderError | TorrentError | SubtitleError,
+      SettingsError | DbError | ProviderError | TorrentError | SubtitleError | DeviceError,
       never
     >,
-  ) => Promise<Exit.Exit<A, SettingsError | DbError | ProviderError | TorrentError | SubtitleError>>
+  ) => Promise<
+    Exit.Exit<
+      A,
+      SettingsError | DbError | ProviderError | TorrentError | SubtitleError | DeviceError
+    >
+  >
 }
 
-type IpcError = SettingsError | DbError | ProviderError | TorrentError | SubtitleError
+type IpcError = SettingsError | DbError | ProviderError | TorrentError | SubtitleError | DeviceError
 
 /** webtorrent writes into the download path, so it has to exist before a torrent loads. */
 function ensureDirectory(path: string): Effect.Effect<void, DbError> {
@@ -360,6 +367,7 @@ function effectFor(
         ...(request.subtitle === undefined ? {} : { subtitle: request.subtitle }),
         ...(request.title === undefined ? {} : { title: request.title }),
         ...(request.fullscreen === undefined ? {} : { fullscreen: request.fullscreen }),
+        ...(request.port === undefined ? {} : { port: request.port }),
       })
     }
     case 'disclaimer:status':

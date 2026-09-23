@@ -1,5 +1,5 @@
-import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Stream } from 'effect'
+import { describe, expect, it, vi } from 'vitest'
 import {
   DatabaseService,
   DatabaseServiceLive,
@@ -12,12 +12,13 @@ import {
   type IpcMainPort,
   registerIpc,
 } from '../src/main/ipc'
-import { playerArgs, playerCommand } from '../src/main/players'
+import { launchPlayer, playerArgs, playerCommand } from '../src/main/players'
 import {
   type SettingsEnvironment,
   SettingsService,
   SettingsServiceLive,
 } from '../src/main/settings'
+import { DeviceError } from '../src/shared/errors'
 import type { IpcEnvelope } from '../src/shared/ipc'
 
 const environment: SettingsEnvironment = {
@@ -133,20 +134,31 @@ describe('external players', () => {
   const vlc = { id: 'VLC', type: 'vlc', path: '/Applications/VLC.app' }
   const bsplayer = { id: 'BSPlayer', type: 'bsplayer', path: 'C:/BSPlayer/bsplayer.exe' }
 
-  it('passes switches, fullscreen, title and url as separate argv entries', () => {
+  it('passes switches, fullscreen, title and url as argv entries', () => {
     expect(
       playerArgs(vlc, {
         url: 'http://127.0.0.1:41000/0',
         title: 'A Movie',
         fullscreen: true,
       }),
+    ).toEqual(['--no-video-title-show', '-f', '--meta-title=A Movie', 'http://127.0.0.1:41000/0'])
+  })
+
+  it('passes a joined subtitle switch as one argument with no literal quotes', () => {
+    expect(
+      playerArgs(vlc, { url: 'http://127.0.0.1:41000/0', subtitle: '/tmp/my subs/file.srt' }),
     ).toEqual([
       '--no-video-title-show',
-      '-f',
-      '--meta-title=',
-      'A Movie',
+      '--sub-file=/tmp/my subs/file.srt',
       'http://127.0.0.1:41000/0',
     ])
+  })
+
+  it('passes a separate subtitle switch as its own argument for the mplayer family', () => {
+    const mplayer = { id: 'MPlayer', type: 'mplayer', path: 'C:/mplayer/mplayer.exe' }
+    expect(
+      playerArgs(mplayer, { url: 'http://127.0.0.1:41000/0', subtitle: '/tmp/file.srt' }),
+    ).toEqual(['--really-quiet', '-sub', '/tmp/file.srt', 'http://127.0.0.1:41000/0'])
   })
 
   it('keeps BSPlayer url-first argument order', () => {
@@ -168,6 +180,28 @@ describe('external players', () => {
         path: '/var/lib/flatpak/app/org.videolan.VLC/current/active/files/bin/vlc',
       }),
     ).toEqual({ file: '/usr/bin/flatpak', prefix: ['run', 'org.videolan.VLC'] })
+  })
+})
+
+describe('launchPlayer', () => {
+  it('resolves once the process starts and reports its exit separately', async () => {
+    const node = { id: 'node', type: 'node', path: process.execPath }
+    const exits: Array<number | null> = []
+
+    await Effect.runPromise(launchPlayer(node, ['-e', '0'], { onExit: (code) => exits.push(code) }))
+
+    await vi.waitFor(() => expect(exits).toEqual([0]))
+  })
+
+  it('fails with a tagged DeviceError when the binary cannot start', async () => {
+    const missing = { id: 'mpv', type: 'mpv', path: 'C:/nope/missing-mpv.exe' }
+
+    const exit = await Effect.runPromiseExit(launchPlayer(missing, ['http://127.0.0.1:1/0']))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : undefined
+    expect(failure?._tag).toBe('Some')
+    if (failure?._tag === 'Some') expect(failure.value).toBeInstanceOf(DeviceError)
   })
 })
 
