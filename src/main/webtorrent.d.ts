@@ -49,6 +49,11 @@ declare module 'webtorrent' {
 
   export default class WebTorrent {
     constructor(options?: WebTorrentOptions)
+    /** Settable at runtime: the live-apply path writes it from settings changes. */
+    maxConns: number
+    /** Rate in bytes/s; `-1` removes the limit. */
+    throttleDownload(rate: number): void
+    throttleUpload(rate: number): void
     readonly torrents: ReadonlyArray<WebTorrentTorrent>
     add(
       torrentId: string | Uint8Array,
