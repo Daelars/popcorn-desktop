@@ -93,6 +93,7 @@ function stubBridge(
   options: {
     show?: unknown
     settings?: Record<string, unknown>
+    players?: unknown
     captureProgress?: (listener: (payload: unknown) => void) => void
   } = {},
 ) {
@@ -112,6 +113,20 @@ function stubBridge(
           return options.show
         case 'settings:all':
           return options.settings ?? {}
+        case 'playback:targets':
+          return [
+            { kind: 'local', id: 'local', name: 'Popcorn Time' },
+            ...(
+              (options.players as
+                | ReadonlyArray<{ id: string; type: string; path: string }>
+                | undefined) ?? []
+            ).map((player) => ({
+              kind: 'external',
+              id: player.id,
+              name: player.id,
+              type: player.type,
+            })),
+          ]
         default:
           return undefined
       }
@@ -183,6 +198,24 @@ it('shows upload speed, not the uploaded total, in the player stats', async () =
     const text = document.querySelector('.upload_speed_player')?.textContent ?? ''
     expect(text).toContain(fileSize(2048))
     expect(text).not.toContain(fileSize(999))
+  })
+})
+
+it('starts the stream and shows the external panel for a chosen external player', async () => {
+  const calls = stubBridge({
+    settings: { chosenPlayer: 'VLC' },
+    players: [{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }],
+  })
+  renderPlayer()
+
+  await waitFor(() => {
+    expect(document.querySelector('.player-name')?.textContent).toBe('VLC')
+  })
+  const start = calls.find((call) => call.channel === 'stream:start')
+  expect(start?.payload).toMatchObject({ torrentId: source, fileIndex: 0 })
+  expect(calls.find((call) => call.channel === 'playback:play')?.payload).toMatchObject({
+    targetId: 'VLC',
+    sessionId: 'session-1',
   })
 })
 

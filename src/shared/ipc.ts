@@ -260,6 +260,8 @@ export const contracts = {
       title: Schema.optional(Schema.String),
       subtitle: Schema.optional(Schema.String),
       fullscreen: Schema.optional(Schema.Boolean),
+      /** The loopback port serving the stream, so main can stop it when the player exits. */
+      port: Schema.optional(Schema.Number),
     }),
     response: Schema.Undefined,
   },
