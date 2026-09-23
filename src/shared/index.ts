@@ -1,5 +1,6 @@
 export * from './ids'
 export * from './media'
 export * from './playback'
+export * from './playback-rules'
 export * from './provider'
 export * from './torrent'

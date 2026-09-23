@@ -249,3 +249,26 @@ it('offers the next episode in the final minute and plays it on demand', async (
     ).toBe(true)
   })
 })
+
+it('stops offering the next episode after "No thank you"', async () => {
+  stubBridge({ show: showFixture, settings: { playNextEpisodeAuto: true } })
+  renderPlayer({ imdbId: 'tt0903747', tvdbId: '81189', season: '1', episode: '1' })
+
+  await waitFor(() => {
+    expect(document.querySelector('.player')).not.toBeNull()
+  })
+  playerMock.duration.mockReturnValue(120)
+  playerMock.currentTime.mockReturnValue(80)
+
+  await waitFor(
+    () => {
+      expect(document.querySelector('#nextCountdown')?.textContent).toBe('40')
+    },
+    { timeout: 4000 },
+  )
+  fireEvent.click(screen.getByText('No thank you'))
+  await waitFor(() => {
+    const overlay = document.querySelector('.playing_next') as HTMLElement | null
+    expect(overlay?.style.display).not.toBe('block')
+  })
+})

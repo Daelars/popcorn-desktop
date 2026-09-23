@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { IpcEventPayload } from '../../../shared/ipc'
+import { autoplayPolicy, closeState, nearEnd, resumeAt } from '../../../shared/playback-rules'
 import { popcorn } from '../bridge'
 import { fileSize } from '../format'
 import { type PlayerKeyActions, usePlayerKeys } from '../hooks/usePlayerKeys'
@@ -117,6 +118,8 @@ export function Player({
   const [playingNext, setPlayingNext] = useState(false)
   const [countdown, setCountdown] = useState(60)
   const [nextDismissed, setNextDismissed] = useState(false)
+  // The interval/ended handlers run inside the player effect; a ref carries the dismissal in.
+  const nextDismissedRef = useRef(false)
   const [metadataVerified, setMetadataVerified] = useState(false)
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -263,9 +266,11 @@ export function Player({
       // `onPlayerReady` from player.js: the saved position is restored on loadeddata.
       player.on('loadeddata', () => {
         const live = liveSettings.current
-        if (live.lastWatchedTitle === live.title && typeof live.lastWatchedTime === 'number') {
-          if (live.lastWatchedTime > 0) player.currentTime(live.lastWatchedTime)
-        }
+        const at = resumeAt(live.title, {
+          title: live.lastWatchedTitle,
+          time: live.lastWatchedTime,
+        })
+        if (at !== undefined) player.currentTime(at)
       })
       player.on('error', () => {
         const error = player.error()
@@ -326,20 +331,18 @@ export function Player({
     // `checkAutoPlay` from player.js: while the last minute plays, offer the next episode.
     const nextTimer = window.setInterval(() => {
       const live = liveSettings.current
-      if (live.nextEpisode === undefined || !live.autoPlay) {
+      if (
+        live.nextEpisode === undefined ||
+        !autoplayPolicy({ autoPlay: live.autoPlay, dismissed: nextDismissedRef.current })
+      ) {
         setPlayingNext(false)
         return
       }
       const duration = player.duration()
       const current = player.currentTime()
-      if (!Number.isFinite(duration) || duration <= 0 || current <= 30) {
-        setPlayingNext(false)
-        return
-      }
-      const remaining = duration - current
-      if (remaining < 60) {
+      if (nearEnd(current, duration)) {
         setPlayingNext(true)
-        setCountdown(Math.max(0, Math.round(remaining)))
+        setCountdown(Math.max(0, Math.round(duration - current)))
       } else {
         setPlayingNext(false)
       }
@@ -348,46 +351,52 @@ export function Player({
     // `onPlayerEnded`: auto-play the next episode, otherwise close like the legacy did.
     const onEnded = () => {
       const live = liveSettings.current
-      if (live.nextEpisode !== undefined && live.autoPlay) live.onPlayNext?.()
-      else live.onClose()
+      if (
+        live.nextEpisode !== undefined &&
+        autoplayPolicy({ autoPlay: live.autoPlay, dismissed: nextDismissedRef.current })
+      ) {
+        live.onPlayNext?.()
+      } else {
+        live.onClose()
+      }
     }
     player.on('ended', onEnded)
 
     return () => {
       window.clearInterval(nextTimer)
-      // `closePlayer` from player.js: remember the position, and mark the title watched
-      // when playback passed 80%. StrictMode's first cleanup sees duration 0 and skips.
-      const duration = player.duration()
-      const current = player.currentTime()
-      if (!isTrailer && Number.isFinite(duration) && duration > 0 && Number.isFinite(current)) {
+      // `closePlayer` from player.js: the pure close rule decides watched vs resume.
+      if (!isTrailer) {
         const live = liveSettings.current
-        const writeSetting = (key: string, value: unknown) => {
-          void popcorn().invoke('settings:set', { key, value } as never)
-        }
-        if (current / duration >= 0.8) {
-          writeSetting('lastWatchedTime', false)
-          if (live.media?.imdbId !== undefined) {
-            if (live.media.tvdbId === undefined) {
-              void popcorn().invoke('watched:markMovie', { imdbId: live.media.imdbId })
-            } else {
-              void popcorn().invoke('watched:markEpisode', {
-                tvdbId: live.media.tvdbId,
-                imdbId: live.media.imdbId,
-                season: live.media.season ?? '',
-                episode: live.media.episode ?? '',
-              })
-            }
-            void queryClient.invalidateQueries({ queryKey: ['library'] })
-            void queryClient.invalidateQueries({ queryKey: ['watched'] })
-            void queryClient.invalidateQueries({ queryKey: ['watched-episodes'] })
+        const state = closeState(player.currentTime(), player.duration())
+        if (state.watched || state.resumeTime !== undefined) {
+          const writeSetting = (key: string, value: unknown) => {
+            void popcorn().invoke('settings:set', { key, value } as never)
           }
-        } else if (current > 0) {
-          writeSetting('lastWatchedTitle', live.title)
-          writeSetting('lastWatchedTime', Math.max(0, current - 5))
+          if (state.watched) {
+            writeSetting('lastWatchedTime', false)
+            if (live.media?.imdbId !== undefined) {
+              if (live.media.tvdbId === undefined) {
+                void popcorn().invoke('watched:markMovie', { imdbId: live.media.imdbId })
+              } else {
+                void popcorn().invoke('watched:markEpisode', {
+                  tvdbId: live.media.tvdbId,
+                  imdbId: live.media.imdbId,
+                  season: live.media.season ?? '',
+                  episode: live.media.episode ?? '',
+                })
+              }
+              void queryClient.invalidateQueries({ queryKey: ['library'] })
+              void queryClient.invalidateQueries({ queryKey: ['watched'] })
+              void queryClient.invalidateQueries({ queryKey: ['watched-episodes'] })
+            }
+          } else if (state.resumeTime !== undefined) {
+            writeSetting('lastWatchedTitle', live.title)
+            writeSetting('lastWatchedTime', state.resumeTime)
+          }
+          // The settings query is cached with `staleTime: Infinity`; without this the next
+          // player mount would read the pre-close snapshot and never resume.
+          void queryClient.invalidateQueries({ queryKey: ['settings'] })
         }
-        // The settings query is cached with `staleTime: Infinity`; without this the next
-        // player mount would read the pre-close snapshot and never resume.
-        void queryClient.invalidateQueries({ queryKey: ['settings'] })
       }
       playerRef.current = null
       setPlayerEl(null)
@@ -761,7 +770,13 @@ export function Player({
           <p id="nextCountdown">{countdown}</p>
         </div>
         <div className="pn_btns">
-          <div className="auto-next-btn playnownextNOT" onClick={() => setNextDismissed(true)}>
+          <div
+            className="auto-next-btn playnownextNOT"
+            onClick={() => {
+              nextDismissedRef.current = true
+              setNextDismissed(true)
+            }}
+          >
             {t('No thank you')}
           </div>
           <div className="auto-next-btn playnownext" onClick={() => onPlayNext?.()}>

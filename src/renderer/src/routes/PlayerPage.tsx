@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router'
 import { Show } from '../../../shared'
+import { nextEpisode as nextEpisodeRule } from '../../../shared/playback-rules'
 import { popcorn } from '../bridge'
 import { ExternalPlayerPanel } from '../components/ExternalPlayerPanel'
 import { LoadingScreen } from '../components/LoadingScreen'
@@ -73,11 +74,9 @@ export function PlayerPage() {
     const season = params.get('season')
     const episode = params.get('episode')
     if (found === undefined || season === null || episode === null) return undefined
-    const index = found.episodes.findIndex(
-      (candidate) => String(candidate.season) === season && String(candidate.episode) === episode,
-    )
-    const next = index === -1 ? undefined : found.episodes[index + 1]
-    if (next === undefined || String(next.season) !== season) return undefined
+    // `processNext` crosses season boundaries; the rule lives in playback-rules.
+    const next = nextEpisodeRule(found.episodes, { season, episode })
+    if (next === undefined) return undefined
     const torrents = Object.entries(next.torrents)
     const best = torrents.find(([name]) => name === quality) ?? torrents[0]
     if (best === undefined) return undefined
