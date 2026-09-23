@@ -1,8 +1,9 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { basename, delimiter, join } from 'node:path'
 import { Context, Effect, Layer } from 'effect'
+import { PlaybackError } from '../shared/errors'
 
 /**
  * The legacy external-player table, ported verbatim: switches, the BSPlayer argument
@@ -257,24 +258,48 @@ export function scanPlayers(
   })
 }
 
-/** Launches a player with an argv array; nothing is interpolated into a shell. */
+export interface LaunchOptions {
+  /** Called when the player process ends, so the caller can close the session it was handed. */
+  readonly onExit?: (code: number | null) => void
+}
+
+/**
+ * Launches a player with an argv array; nothing is interpolated into a shell. The effect
+ * resolves once the process starts, and exit is reported through `onExit` so the caller can
+ * stop the session rather than blocking on the player.
+ */
 export function launchPlayer(
   player: ExternalPlayer,
   args: ReadonlyArray<string>,
-): Effect.Effect<void> {
+  options: LaunchOptions = {},
+): Effect.Effect<void, PlaybackError> {
   const { file, prefix } = playerCommand(player)
-  return Effect.tryPromise(
-    () =>
-      new Promise<void>((resolve, reject) => {
-        execFile(file, [...prefix, ...args], (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
-      }),
-  ).pipe(
-    Effect.asVoid,
-    Effect.orElseSucceed(() => undefined),
-  )
+  return Effect.async<void, PlaybackError>((resume) => {
+    const fail = (cause: unknown) =>
+      new PlaybackError({
+        message: `cannot launch ${player.id}`,
+        target: player.id,
+        operation: 'launch',
+        cause,
+      })
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(file, [...prefix, ...args], { stdio: 'ignore' })
+    } catch (cause) {
+      resume(Effect.fail(fail(cause)))
+      return
+    }
+    const onSpawn = () => resume(Effect.void)
+    const onError = (cause: Error) => resume(Effect.fail(fail(cause)))
+    child.once('spawn', onSpawn)
+    child.once('error', onError)
+    child.once('exit', (code) => options.onExit?.(code))
+    return Effect.sync(() => {
+      child.off('spawn', onSpawn)
+      child.off('error', onError)
+      // The exit listener stays attached: the process outlives this effect on purpose.
+    })
+  })
 }
 
 /** The names the legacy app listed in its player chooser. */
@@ -283,13 +308,16 @@ export const externalPlayerNames: ReadonlyArray<string> = Object.keys(EXTERNAL_P
 /** External players found on disk and the launcher that starts them. */
 export interface PlayersShape {
   readonly list: () => Effect.Effect<ReadonlyArray<ExternalPlayer>>
-  readonly play: (request: {
-    readonly playerId: string
-    readonly url: string
-    readonly subtitle?: string | undefined
-    readonly title?: string | undefined
-    readonly fullscreen?: boolean | undefined
-  }) => Effect.Effect<void>
+  readonly play: (
+    request: {
+      readonly playerId: string
+      readonly url: string
+      readonly subtitle?: string | undefined
+      readonly title?: string | undefined
+      readonly fullscreen?: boolean | undefined
+    },
+    options?: LaunchOptions,
+  ) => Effect.Effect<void, PlaybackError>
 }
 
 export class PlayersService extends Context.Tag('PlayersService')<PlayersService, PlayersShape>() {}
@@ -308,10 +336,18 @@ export const PlayersServiceLive = (environment: PlayersEnvironment) =>
       (players) =>
         PlayersService.of({
           list: () => Effect.succeed(players),
-          play: (request) =>
+          play: (request, options) =>
             Effect.gen(function* () {
               const player = players.find((candidate) => candidate.id === request.playerId)
-              if (player === undefined) return
+              if (player === undefined) {
+                return yield* Effect.fail(
+                  new PlaybackError({
+                    message: `no external player named ${request.playerId}`,
+                    target: request.playerId,
+                    operation: 'play',
+                  }),
+                )
+              }
               const args = playerArgs(player, {
                 url: request.url,
                 ...(request.subtitle === undefined ? {} : { subtitle: request.subtitle }),
@@ -319,7 +355,7 @@ export const PlayersServiceLive = (environment: PlayersEnvironment) =>
                 fullscreen: request.fullscreen === true,
                 utf8Subtitle: true,
               })
-              yield* launchPlayer(player, args)
+              yield* launchPlayer(player, args, options ?? {})
             }),
         }),
     ),

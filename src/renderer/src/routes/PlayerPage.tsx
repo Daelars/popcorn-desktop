@@ -234,8 +234,16 @@ export function PlayerPage() {
       </section>
     )
   }
-  if (chosenPlayer === 'extplayer' && localPath === '') {
-    return <ExternalPlayerPanel source={source} title={displayTitle} fileIndex={fileIndex} />
+  if (chosenPlayer !== 'local' && localPath === '') {
+    // A concrete target id (not `local`) plays through an external player; branch on kind.
+    return (
+      <ExternalPlayerPanel
+        source={source}
+        title={displayTitle}
+        fileIndex={fileIndex}
+        targetId={chosenPlayer}
+      />
+    )
   }
   if (failure !== undefined) {
     return (

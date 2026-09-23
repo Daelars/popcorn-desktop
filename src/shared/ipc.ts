@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { PlaybackTarget } from './playback'
 import { FetchResult, Filters, Provider, TabFilters } from './provider'
 import type { Settings, SettingsKey } from './settings'
 
@@ -247,20 +248,15 @@ export const contracts = {
       failures: Schema.Array(Schema.Struct({ provider: Schema.String, message: Schema.String })),
     }),
   },
-  'players:list': {
+  /** Everywhere a session can play: `local` plus each external player found on disk. */
+  'playback:targets': {
     request: Schema.Struct({}),
-    response: Schema.Array(
-      Schema.Struct({
-        id: Schema.String,
-        type: Schema.String,
-        path: Schema.String,
-      }),
-    ),
+    response: Schema.Array(PlaybackTarget),
   },
-  'players:play': {
+  'playback:play': {
     request: Schema.Struct({
-      playerId: Schema.String,
-      url: Schema.String,
+      targetId: Schema.String,
+      sessionId: Schema.String,
       title: Schema.optional(Schema.String),
       subtitle: Schema.optional(Schema.String),
       fullscreen: Schema.optional(Schema.Boolean),
