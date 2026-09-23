@@ -116,13 +116,17 @@ function stubBridge(
   return calls
 }
 
-function renderPlayer(extra: Record<string, string> = {}) {
+function renderPlayer(extra: Record<string, string> = {}, withHome = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const query = new URLSearchParams({ source, title, quality: '1080p', ...extra })
+  const entries = withHome
+    ? ['/home', `/player?${query.toString()}`]
+    : [`/player?${query.toString()}`]
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`/player?${query.toString()}`]}>
+      <MemoryRouter initialEntries={entries}>
         <Routes>
+          {withHome ? <Route path="/home" element={<div>Home</div>} /> : null}
           <Route path="/player" element={<PlayerPage />} />
         </Routes>
       </MemoryRouter>
@@ -282,5 +286,38 @@ it('offers the next episode in the final minute and plays it on demand', async (
         String((call.payload as { torrentId?: string }).torrentId).includes('second'),
       ),
     ).toBe(true)
+  })
+})
+
+it('closes to the page before the player after playing the next episode', async () => {
+  const calls = stubBridge({ show: showFixture, settings: { playNextEpisodeAuto: true } })
+  renderPlayer({ imdbId: 'tt0903747', tvdbId: '81189', season: '1', episode: '1' }, true)
+
+  await waitFor(() => {
+    expect(document.querySelector('.player')).not.toBeNull()
+  })
+  playerMock.duration.mockReturnValue(120)
+  playerMock.currentTime.mockReturnValue(80)
+
+  await waitFor(
+    () => {
+      expect(document.querySelector('#nextCountdown')?.textContent).toBe('40')
+    },
+    { timeout: 4000 },
+  )
+  fireEvent.click(screen.getByText('Play Now'))
+  await waitFor(() => {
+    const started = calls.filter((call) => call.channel === 'stream:start')
+    expect(
+      started.some((call) =>
+        String((call.payload as { torrentId?: string }).torrentId).includes('second'),
+      ),
+    ).toBe(true)
+  })
+
+  // Next episode replaces the current history entry, so closing returns home, not the old episode.
+  fireEvent.click(document.querySelector('.close-info-player') as HTMLElement)
+  await waitFor(() => {
+    expect(screen.getByText('Home')).toBeInTheDocument()
   })
 })
