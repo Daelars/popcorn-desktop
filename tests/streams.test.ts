@@ -9,6 +9,7 @@ import {
   StreamSession,
   StreamSessionLive,
 } from '../src/main/stream-session'
+import { SubtitlesService } from '../src/main/subtitles/service'
 import { TorrentEngine, type TorrentHandle } from '../src/main/torrent'
 
 const FILE_BYTES = Buffer.from('0123456789')
@@ -56,8 +57,17 @@ function fakeHandle() {
   return { state, layer, handle }
 }
 
-function runtimeWith(engine: ReturnType<typeof fakeHandle>) {
-  return ManagedRuntime.make(StreamSessionLive.pipe(Layer.provide(engine.layer)))
+function runtimeWith(engine: ReturnType<typeof fakeHandle>, fetchSubtitle = false) {
+  const subtitles = Layer.succeed(SubtitlesService, {
+    list: () => Effect.succeed({ subtitles: {} }),
+    fetch: () =>
+      fetchSubtitle
+        ? Effect.succeed({ port: 41001, url: 'http://127.0.0.1:41001/subtitles.vtt' })
+        : Effect.die('unused'),
+  })
+  return ManagedRuntime.make(
+    StreamSessionLive.pipe(Layer.provide(Layer.mergeAll(engine.layer, subtitles))),
+  )
 }
 
 const request = {
@@ -135,6 +145,35 @@ describe('StreamSession', () => {
       }),
     )
     expect(engine.state.selected).toBe(0)
+    await runtime.dispose()
+  })
+
+  it('runs the subtitle step and carries its url into ready', async () => {
+    const engine = fakeHandle()
+    const runtime = runtimeWith(engine, true)
+    const states = await runtime.runPromise(
+      Effect.gen(function* () {
+        const session = yield* StreamSession
+        const { id } = yield* session.open({
+          ...request,
+          imdbId: 'tt0944947',
+          subtitleLang: 'en',
+          season: '1',
+          episode: '2',
+        })
+        const collected = yield* session.states(id).pipe(
+          Stream.takeUntil((state) => state.state === 'ready'),
+          Stream.runCollect,
+          Effect.timeout('5 seconds'),
+        )
+        yield* session.close(id)
+        return Array.from(collected)
+      }),
+    )
+    const names = states.map((state) => state.state)
+    expect(names).toContain('waitingForSubtitles')
+    const ready = states.find((state) => state.state === 'ready')
+    expect(ready?.subtitle).toBe('http://127.0.0.1:41001/subtitles.vtt')
     await runtime.dispose()
   })
 
