@@ -48,7 +48,13 @@ export const makeAppLayer = (input: AppLayerInput) => {
   )
   const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
   const core = Layer.mergeAll(settings, database, sqlite, LocalFilesLive, migration)
-  const streams = StreamSessionLive.pipe(Layer.provide(WebTorrentEngineLive), Layer.provide(core))
+  // The subtitle step lives inside StreamSession, so subtitles are built before the streams.
+  const subtitles = SubtitlesServiceLive.pipe(Layer.provide(core))
+  const streams = StreamSessionLive.pipe(
+    Layer.provide(WebTorrentEngineLive),
+    Layer.provide(subtitles),
+    Layer.provide(core),
+  )
   const search = SearchServiceLive.pipe(Layer.provide(settings))
   const providers = ProvidersServiceLive.pipe(Layer.provide(settings))
   const players = PlayersServiceLive({
@@ -57,9 +63,6 @@ export const makeAppLayer = (input: AppLayerInput) => {
   })
   const updates = UpdatesServiceLive(input.updatePort, input.publishUpdate)
   const catalog = CatalogServiceLive.pipe(Layer.provide(Layer.mergeAll(providers, database)))
-  const subtitles = SubtitlesServiceLive.pipe(
-    Layer.provide(Layer.mergeAll(settings, LocalFilesLive)),
-  )
   const collection = CollectionServiceLive.pipe(
     Layer.provide(Layer.mergeAll(FilePickerServiceLive, settings, database)),
   )

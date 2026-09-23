@@ -128,6 +128,10 @@ export function PlayerPage() {
             torrentId: source,
             fileIndex,
             origin: window.location.origin,
+            ...(imdbId === '' ? {} : { imdbId }),
+            ...(subtitleLang === '' ? {} : { subtitleLang }),
+            ...(params.get('season') === null ? {} : { season: params.get('season') ?? '' }),
+            ...(params.get('episode') === null ? {} : { episode: params.get('episode') ?? '' }),
           })
         : bridge.invoke('local:serve', { path: localPath, origin: window.location.origin })
     void start
@@ -155,28 +159,18 @@ export function PlayerPage() {
             }
           }
         }
-        if (subtitleLang !== '' && imdbId !== '') {
-          // The provider subtitle picked on the detail page: download, convert and cue it.
-          try {
-            const track = await bridge.invoke('subtitles:fetch', {
-              imdbId,
-              lang: subtitleLang,
-              origin: window.location.origin,
-              ...(params.get('season') === null ? {} : { season: params.get('season') ?? '' }),
-              ...(params.get('episode') === null ? {} : { episode: params.get('episode') ?? '' }),
-            })
-            tracks = [
-              ...tracks,
-              {
-                src: track.url,
-                language: subtitleLang.split('|')[0] ?? subtitleLang,
-                label: subtitleLang,
-                default: true,
-              },
-            ]
-          } catch {
-            // A provider subtitle that cannot be fetched must not stop playback.
-          }
+        if ('id' in session && session.subtitle !== undefined) {
+          // The main process fetched the subtitle inside StreamSession's waitingForSubtitles step.
+          const label = subtitleLang === '' ? 'Subtitle' : subtitleLang
+          tracks = [
+            ...tracks,
+            {
+              src: session.subtitle,
+              language: subtitleLang.split('|')[0] || 'und',
+              label,
+              default: true,
+            },
+          ]
         }
         if (cancelled) {
           if ('id' in session) void stopStream(session.id).catch(() => undefined)

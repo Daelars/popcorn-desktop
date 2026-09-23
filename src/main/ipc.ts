@@ -203,6 +203,8 @@ const handlers = {
           ...(request.fileHint === undefined ? {} : { fileHint: request.fileHint }),
           ...(request.season === undefined ? {} : { season: request.season }),
           ...(request.episode === undefined ? {} : { episode: request.episode }),
+          ...(request.imdbId === undefined ? {} : { imdbId: request.imdbId }),
+          ...(request.subtitleLang === undefined ? {} : { subtitleLang: request.subtitleLang }),
           ...(request.port === undefined ? {} : { port: request.port }),
         })
         // Wait for the session to reach `ready` (or fail) before answering the renderer.
@@ -221,7 +223,13 @@ const handlers = {
             }),
           )
         }
-        return { id, infoHash: done.infoHash, port: done.port, url: done.url }
+        return {
+          id,
+          infoHash: done.infoHash,
+          port: done.port,
+          url: done.url,
+          ...(done.subtitle === undefined ? {} : { subtitle: done.subtitle }),
+        }
       }),
     ),
   'stream:stop': ({ id }) => Effect.flatMap(StreamSession, (sessions) => sessions.close(id)),
