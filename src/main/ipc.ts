@@ -1,9 +1,8 @@
-import { copyFile, mkdir } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { mkdir } from 'node:fs/promises'
 import { Cause, Chunk, Effect, Exit, Schema } from 'effect'
 import {
   DbError,
-  ProviderError,
+  type ProviderError,
   type SettingsError,
   type SubtitleError,
   type TorrentError,
@@ -14,19 +13,24 @@ import {
   type IpcEnvelope,
   type IpcEvent,
   type IpcEventPayload,
+  type IpcRequest,
+  type IpcResponse,
   toIpcFailure,
 } from '../shared/ipc'
-import { DatabaseService, type DatabaseServiceShape } from './database'
+import { CatalogService } from './catalog'
+import { CollectionService } from './collection'
+import { DatabaseService } from './database'
 import { FilePickerService } from './file-picker'
-import { LocalFiles, type LocalFilesShape } from './localfiles'
+import { LocalFiles } from './localfiles'
 import { PlayersService } from './players'
-import { type ProviderEntry, ProvidersService } from './providers/registry'
+import { ProvidersService } from './providers/registry'
 import { resolveItem } from './resolve'
-import { type SearchOutcome, SearchService } from './search'
-import { SettingsService, type SettingsServiceShape } from './settings'
-import { StreamManager, type StreamManagerShape } from './streams'
-import { fetchSubtitle, searchSubtitles } from './subtitles/opensubtitles'
-import { UpdatesService, type UpdatesShape } from './updates'
+import { SearchService } from './search'
+import { SettingsService, tmdbApiKey } from './settings'
+import { SettingsEffects } from './settings-effects'
+import { StreamManager } from './streams'
+import { SubtitlesService } from './subtitles/service'
+import { UpdatesService } from './updates'
 import { WindowService } from './window'
 
 /** The Electron `ipcMain` surface we depend on — fakeable in tests. */
@@ -37,24 +41,6 @@ export interface IpcMainPort {
   ) => void
 }
 
-export interface IpcServices {
-  readonly settings: SettingsServiceShape
-  readonly database: DatabaseServiceShape
-  readonly providers: ReadonlyArray<ProviderEntry>
-  readonly window: WindowControls
-  readonly stream: StreamManagerShape
-  readonly files: FilePickerPort
-  readonly players: ExternalPlayersPort
-  readonly search: SearchPort
-  readonly local: LocalFilesShape
-  readonly updates: UpdatesShape
-}
-
-/** Online torrent search across the reachable providers. */
-export interface SearchPort {
-  readonly search: (query: string, category: string) => Effect.Effect<SearchOutcome>
-}
-
 /** External players found on disk and the launcher that starts them. */
 export interface ExternalPlayersPort {
   readonly list: () => Effect.Effect<
@@ -63,35 +49,19 @@ export interface ExternalPlayersPort {
   readonly play: (request: {
     readonly playerId: string
     readonly url: string
-    readonly subtitle?: string
-    readonly title?: string
-    readonly fullscreen?: boolean
+    readonly subtitle?: string | undefined
+    readonly title?: string | undefined
+    readonly fullscreen?: boolean | undefined
   }) => Effect.Effect<void>
-}
-
-/** Native file pickers and shell actions; faked in tests so the flows run headless. */
-export interface FilePickerPort {
-  /** Returns the chosen `.torrent` file, or undefined when the user cancels. */
-  readonly pickTorrent: () => Effect.Effect<string | undefined>
-  readonly openDirectory: (path: string) => Effect.Effect<void>
-}
-
-/** Window chrome actions the renderer's titlebar drives. */
-export interface WindowControls {
-  readonly minimize: () => Effect.Effect<void>
-  readonly maximize: () => Effect.Effect<void>
-  readonly close: () => Effect.Effect<void>
-  /** UI scaling, in percent; the legacy mapped it onto a 1.2-step zoom level. */
-  readonly setZoom: (percent: number) => Effect.Effect<void>
-  /** `scaleWindow` from player.js: the window resized to the video size times a factor. */
-  readonly setSize: (width: number, height: number) => Effect.Effect<void>
 }
 
 /** Every service an IPC handler reads from the Effect context. */
 export type IpcServiceTags =
   | SettingsService
+  | SettingsEffects
   | DatabaseService
   | ProvidersService
+  | CatalogService
   | WindowService
   | StreamManager
   | FilePickerService
@@ -99,6 +69,8 @@ export type IpcServiceTags =
   | SearchService
   | LocalFiles
   | UpdatesService
+  | SubtitlesService
+  | CollectionService
 
 /** The composition root satisfies this with the ManagedRuntime over the AppLayer. */
 export interface EffectRunner<R, ER> {
@@ -115,362 +87,164 @@ function ensureDirectory(path: string): Effect.Effect<void, DbError> {
   })
 }
 
-/** Settings values arrive decoded but untyped; the OpenSubtitles fields are strings. */
-function readString(
-  settings: SettingsServiceShape,
-  key: string,
-): Effect.Effect<string, SettingsError> {
-  return settings.read(key).pipe(Effect.map((value) => (typeof value === 'string' ? value : '')))
+/**
+ * One entry per contract channel. Omitting a channel, or returning the wrong type for one,
+ * is a compile error against this mapped type. `undefined` responses accept `void`, which is
+ * what the void-returning service methods produce.
+ */
+export type Handlers = {
+  readonly [K in IpcChannel]: (
+    request: IpcRequest<K>,
+  ) => Effect.Effect<
+    IpcResponse<K> extends undefined ? void : IpcResponse<K>,
+    IpcError,
+    IpcServiceTags
+  >
 }
 
-function effectForServices(
-  channel: IpcChannel,
-  services: IpcServices,
-  payload: unknown,
-): Effect.Effect<unknown, IpcError> {
-  switch (channel) {
-    case 'settings:get': {
-      const { key } = Schema.decodeUnknownSync(contracts['settings:get'].request)(payload)
-      return services.settings.read(key)
-    }
-    case 'settings:set': {
-      const { key, value } = Schema.decodeUnknownSync(contracts['settings:set'].request)(payload)
-      return Effect.gen(function* () {
-        yield* services.settings.set(key, value)
-        if (key === 'bigPicture' && typeof value === 'number') {
-          yield* services.window.setZoom(value)
-        }
-      })
-    }
-    case 'settings:all':
-      return services.settings.snapshot
-    case 'bookmarks:list': {
-      const { type } = Schema.decodeUnknownSync(contracts['bookmarks:list'].request)(payload)
-      return services.database.bookmarks.list(type)
-    }
-    case 'bookmarks:add': {
-      const { imdbId, type } = Schema.decodeUnknownSync(contracts['bookmarks:add'].request)(payload)
-      return services.database.bookmarks.add(imdbId, type)
-    }
-    case 'bookmarks:remove': {
-      const { imdbId } = Schema.decodeUnknownSync(contracts['bookmarks:remove'].request)(payload)
-      return services.database.bookmarks.remove(imdbId)
-    }
-    case 'watched:movies':
-      return services.database.watched.movies
-    case 'watched:markMovie': {
-      const { imdbId } = Schema.decodeUnknownSync(contracts['watched:markMovie'].request)(payload)
-      return services.database.watched.markMovie(imdbId)
-    }
-    case 'watched:unmarkMovie': {
-      const { imdbId } = Schema.decodeUnknownSync(contracts['watched:unmarkMovie'].request)(payload)
-      return services.database.watched.unmarkMovie(imdbId)
-    }
-    case 'watched:episodes': {
-      const { tvdbId } = Schema.decodeUnknownSync(contracts['watched:episodes'].request)(payload)
-      return services.database.watched.episodesFor(tvdbId)
-    }
-    case 'watched:markEpisode': {
-      const episode = Schema.decodeUnknownSync(contracts['watched:markEpisode'].request)(payload)
-      return services.database.watched.markEpisode(episode)
-    }
-    case 'watched:unmarkEpisode': {
-      const episode = Schema.decodeUnknownSync(contracts['watched:unmarkEpisode'].request)(payload)
-      return services.database.watched.unmarkEpisode(episode)
-    }
-    case 'browse:providers':
-      return Effect.succeed(services.providers.map((entry) => entry.descriptor))
-    case 'browse:fetch': {
-      const { provider, filters } = Schema.decodeUnknownSync(contracts['browse:fetch'].request)(
-        payload,
-      )
-      const entry = services.providers.find((candidate) => candidate.descriptor.name === provider)
-      if (entry === undefined) {
-        return Effect.fail(
-          new ProviderError({ provider, operation: 'fetch', message: 'unknown provider' }),
-        )
-      }
-      // Providers are heterogeneous; the page is validated against shared schemas at the renderer.
-      const fetchPage = async (): Promise<unknown> => entry.provider.fetch(filters)
-      return Effect.tryPromise(fetchPage).pipe(
-        Effect.mapError((cause) =>
-          cause instanceof ProviderError
-            ? cause
-            : new ProviderError({
-                provider,
-                operation: 'fetch',
-                message: 'provider request failed',
-                cause,
-              }),
-        ),
-        Effect.tap((page) => cachePage(services.database, page)),
-      )
-    }
-    case 'browse:filters': {
-      const { provider } = Schema.decodeUnknownSync(contracts['browse:filters'].request)(payload)
-      const entry = services.providers.find((candidate) => candidate.descriptor.name === provider)
-      if (entry === undefined) {
-        return Effect.fail(
-          new ProviderError({ provider, operation: 'filters', message: 'unknown provider' }),
-        )
-      }
-      const fetchFilters = async (): Promise<unknown> => entry.provider.formatFilters()
-      return Effect.tryPromise(fetchFilters).pipe(
-        Effect.mapError((cause) =>
-          cause instanceof ProviderError
-            ? cause
-            : new ProviderError({
-                provider,
-                operation: 'filters',
-                message: 'provider filters failed',
-                cause,
-              }),
-        ),
-      )
-    }
-    case 'media:getMovie': {
-      const { imdbId } = Schema.decodeUnknownSync(contracts['media:getMovie'].request)(payload)
-      return services.database.media.getMovie(imdbId)
-    }
-    case 'media:getShow': {
-      const { imdbId } = Schema.decodeUnknownSync(contracts['media:getShow'].request)(payload)
-      return services.database.media.getShow(imdbId)
-    }
-    case 'media:resolve': {
-      const request = Schema.decodeUnknownSync(contracts['media:resolve'].request)(payload)
-      return Effect.gen(function* () {
-        const tmdb = yield* services.settings.read('tmdb')
-        const apiKey =
-          typeof tmdb === 'object' &&
-          tmdb !== null &&
-          'api_key' in tmdb &&
-          typeof (tmdb as { api_key: unknown }).api_key === 'string'
-            ? (tmdb as { api_key: string }).api_key
-            : ''
-        return yield* resolveItem(request, apiKey)
-      })
-    }
-    case 'window:minimize':
-      return services.window.minimize()
-    case 'window:maximize':
-      return services.window.maximize()
-    case 'window:close':
-      return services.window.close()
-    case 'window:setSize': {
-      const { width, height } = Schema.decodeUnknownSync(contracts['window:setSize'].request)(
-        payload,
-      )
-      return services.window.setSize(width, height)
-    }
-    case 'local:serve': {
-      const { path, origin } = Schema.decodeUnknownSync(contracts['local:serve'].request)(payload)
-      return services.local.serve(path, origin)
-    }
-    case 'local:stop': {
-      const { port } = Schema.decodeUnknownSync(contracts['local:stop'].request)(payload)
-      return services.local.stop(port)
-    }
-    case 'local:subtitle': {
-      const { path, origin } = Schema.decodeUnknownSync(contracts['local:subtitle'].request)(
-        payload,
-      )
-      return services.local.subtitle(path, origin)
-    }
-    case 'subtitles:list': {
-      const { imdbId } = Schema.decodeUnknownSync(contracts['subtitles:list'].request)(payload)
-      return Effect.gen(function* () {
-        const username = yield* readString(services.settings, 'opensubtitlesUsername')
-        const password = yield* readString(services.settings, 'opensubtitlesPassword')
-        const subtitles = yield* searchSubtitles({ imdbId, username, password })
-        return { subtitles }
-      })
-    }
-    case 'subtitles:fetch': {
-      const { imdbId, lang, origin } = Schema.decodeUnknownSync(
-        contracts['subtitles:fetch'].request,
-      )(payload)
-      return Effect.gen(function* () {
-        const username = yield* readString(services.settings, 'opensubtitlesUsername')
-        const password = yield* readString(services.settings, 'opensubtitlesPassword')
-        const vtt = yield* fetchSubtitle({ imdbId, lang, username, password })
-        return yield* services.local.serveVtt(vtt, origin)
-      })
-    }
-    case 'updates:check': {
-      const { manual } = Schema.decodeUnknownSync(contracts['updates:check'].request)(payload)
-      return services.updates.check(manual)
-    }
-    case 'updates:download':
-      return services.updates.download()
-    case 'updates:install':
-      return services.updates.install()
-    case 'stream:files': {
-      const { torrentId } = Schema.decodeUnknownSync(contracts['stream:files'].request)(payload)
-      return Effect.gen(function* () {
-        const downloadPath = yield* services.settings.get('tmpLocation')
+/**
+ * The handler table. Each line delegates to the owning service; the only decoding happens
+ * in `registerIpc`, and no business logic lives here.
+ */
+const handlers = {
+  'settings:get': ({ key }) => Effect.flatMap(SettingsService, (settings) => settings.read(key)),
+  'settings:set': ({ key, value }) =>
+    Effect.flatMap(SettingsEffects, (settings) => settings.set(key, value)),
+  'settings:all': () => Effect.flatMap(SettingsService, (settings) => settings.snapshot),
+  'bookmarks:list': ({ type }) =>
+    Effect.flatMap(DatabaseService, (database) => database.bookmarks.list(type)),
+  'bookmarks:add': ({ imdbId, type }) =>
+    Effect.flatMap(DatabaseService, (database) => database.bookmarks.add(imdbId, type)),
+  'bookmarks:remove': ({ imdbId }) =>
+    Effect.flatMap(DatabaseService, (database) => database.bookmarks.remove(imdbId)),
+  'watched:movies': () => Effect.flatMap(DatabaseService, (database) => database.watched.movies),
+  'watched:markMovie': ({ imdbId }) =>
+    Effect.flatMap(DatabaseService, (database) => database.watched.markMovie(imdbId)),
+  'watched:unmarkMovie': ({ imdbId }) =>
+    Effect.flatMap(DatabaseService, (database) => database.watched.unmarkMovie(imdbId)),
+  'watched:episodes': ({ tvdbId }) =>
+    Effect.flatMap(DatabaseService, (database) => database.watched.episodesFor(tvdbId)),
+  'watched:markEpisode': (episode) =>
+    Effect.flatMap(DatabaseService, (database) => database.watched.markEpisode(episode)),
+  'watched:unmarkEpisode': (episode) =>
+    Effect.flatMap(DatabaseService, (database) => database.watched.unmarkEpisode(episode)),
+  'browse:providers': () =>
+    Effect.map(ProvidersService, (entries) => entries.map((entry) => entry.descriptor)),
+  'browse:fetch': ({ provider, filters }) =>
+    Effect.flatMap(CatalogService, (catalog) => catalog.fetch(provider, filters)),
+  'browse:filters': ({ provider }) =>
+    Effect.flatMap(CatalogService, (catalog) => catalog.filters(provider)),
+  'media:getMovie': ({ imdbId }) =>
+    Effect.flatMap(DatabaseService, (database) => database.media.getMovie(imdbId)),
+  'media:getShow': ({ imdbId }) =>
+    Effect.flatMap(DatabaseService, (database) => database.media.getShow(imdbId)),
+  'media:resolve': (request) =>
+    Effect.flatMap(SettingsService, (settings) =>
+      Effect.flatMap(tmdbApiKey(settings), (apiKey) => resolveItem(request, apiKey)),
+    ),
+  'window:minimize': () => Effect.flatMap(WindowService, (window) => window.minimize()),
+  'window:maximize': () => Effect.flatMap(WindowService, (window) => window.maximize()),
+  'window:close': () => Effect.flatMap(WindowService, (window) => window.close()),
+  'window:setSize': ({ width, height }) =>
+    Effect.flatMap(WindowService, (window) => window.setSize(width, height)),
+  'local:serve': ({ path, origin }) =>
+    Effect.flatMap(LocalFiles, (local) => local.serve(path, origin)),
+  'local:stop': ({ port }) => Effect.flatMap(LocalFiles, (local) => local.stop(port)),
+  'local:subtitle': ({ path, origin }) =>
+    Effect.flatMap(LocalFiles, (local) => local.subtitle(path, origin)),
+  'subtitles:list': ({ imdbId }) =>
+    Effect.flatMap(SubtitlesService, (subtitles) => subtitles.list(imdbId)),
+  'subtitles:fetch': ({ imdbId, lang, origin }) =>
+    Effect.flatMap(SubtitlesService, (subtitles) => subtitles.fetch(imdbId, lang, origin)),
+  'updates:check': ({ manual }) =>
+    Effect.flatMap(UpdatesService, (updates) => updates.check(manual)),
+  'updates:download': () => Effect.flatMap(UpdatesService, (updates) => updates.download()),
+  'updates:install': () => Effect.flatMap(UpdatesService, (updates) => updates.install()),
+  'stream:files': ({ torrentId }) =>
+    Effect.flatMap(StreamManager, (streams) =>
+      Effect.gen(function* () {
+        const settings = yield* SettingsService
+        const downloadPath = yield* settings.get('tmpLocation')
         yield* ensureDirectory(downloadPath)
-        const probe = yield* services.stream.files(torrentId, downloadPath)
+        const probe = yield* streams.files(torrentId, downloadPath)
         // Only serialisable fields may cross the boundary; the probe keeps a live handle.
         return { infoHash: probe.infoHash, files: probe.files }
-      })
-    }
-    case 'stream:start': {
-      const request = Schema.decodeUnknownSync(contracts['stream:start'].request)(payload)
-      return Effect.gen(function* () {
-        const downloadPath = yield* services.settings.get('tmpLocation')
+      }),
+    ),
+  'stream:start': (request) =>
+    Effect.flatMap(StreamManager, (streams) =>
+      Effect.gen(function* () {
+        const settings = yield* SettingsService
+        const downloadPath = yield* settings.get('tmpLocation')
         yield* ensureDirectory(downloadPath)
-        return yield* services.stream.start({
+        return yield* streams.start({
           torrentId: request.torrentId,
           fileIndex: request.fileIndex,
           downloadPath,
           origin: request.origin,
           ...(request.port === undefined ? {} : { port: request.port }),
         })
-      })
-    }
-    case 'stream:stop': {
-      const { port } = Schema.decodeUnknownSync(contracts['stream:stop'].request)(payload)
-      return services.stream.stopSession(port)
-    }
-    case 'collection:list':
-      return services.database.collection.list
-    case 'collection:add': {
-      const { name, source } = Schema.decodeUnknownSync(contracts['collection:add'].request)(
-        payload,
-      )
-      return services.database.collection.add(name, source)
-    }
-    case 'collection:import':
-      return Effect.gen(function* () {
-        const picked = yield* services.files.pickTorrent()
-        if (picked === undefined) return
-        const dataDir = yield* services.settings.get('databaseLocation')
-        const name = basename(picked, '.torrent')
-        const target = join(dataDir, 'TorrentCollection', `${name}.torrent`)
-        yield* Effect.tryPromise({
-          try: async () => {
-            await mkdir(dirname(target), { recursive: true })
-            await copyFile(picked, target)
-          },
-          catch: (cause) =>
-            new DbError({
-              message: `cannot import torrent file ${picked}`,
-              operation: 'collection.import',
-              cause,
-            }),
-        })
-        yield* services.database.collection.add(name, `file:${target}`)
-      })
-    case 'search:torrents': {
-      const { query, category } = Schema.decodeUnknownSync(contracts['search:torrents'].request)(
-        payload,
-      )
-      return services.search.search(query, category)
-    }
-    case 'players:list':
-      return services.players.list()
-    case 'players:play': {
-      const request = Schema.decodeUnknownSync(contracts['players:play'].request)(payload)
-      return services.players.play({
-        playerId: request.playerId,
-        url: request.url,
-        ...(request.subtitle === undefined ? {} : { subtitle: request.subtitle }),
-        ...(request.title === undefined ? {} : { title: request.title }),
-        ...(request.fullscreen === undefined ? {} : { fullscreen: request.fullscreen }),
-      })
-    }
-    case 'disclaimer:status':
-      return Effect.map(services.database.meta.get('disclaimerAccepted'), (value) => ({
-        accepted: value === true,
-      }))
-    case 'disclaimer:accept':
-      return services.database.meta.set('disclaimerAccepted', true)
-    case 'files:openDirectory': {
-      const { target } = Schema.decodeUnknownSync(contracts['files:openDirectory'].request)(payload)
-      const key =
-        target === 'cache'
-          ? 'tmpLocation'
-          : target === 'downloads'
-            ? 'downloadsLocation'
-            : 'databaseLocation'
-      return Effect.gen(function* () {
-        const path = yield* services.settings.get(key)
-        yield* services.files.openDirectory(path)
-      })
-    }
-    case 'collection:remove': {
-      const { id } = Schema.decodeUnknownSync(contracts['collection:remove'].request)(payload)
-      return services.database.collection.remove(id)
-    }
-    case 'collection:rename': {
-      const { id, name } = Schema.decodeUnknownSync(contracts['collection:rename'].request)(payload)
-      return services.database.collection.rename(id, name)
-    }
-    case 'torrents:list':
-      return services.stream.list
-    case 'torrents:pause': {
-      const { infoHash } = Schema.decodeUnknownSync(contracts['torrents:pause'].request)(payload)
-      return services.stream.pause(infoHash)
-    }
-    case 'torrents:resume': {
-      const { infoHash } = Schema.decodeUnknownSync(contracts['torrents:resume'].request)(payload)
-      return services.stream.resume(infoHash)
-    }
-    case 'torrents:remove': {
-      const { infoHash } = Schema.decodeUnknownSync(contracts['torrents:remove'].request)(payload)
-      return services.stream.stop(infoHash)
-    }
-  }
-}
+      }),
+    ),
+  'stream:stop': ({ port }) =>
+    Effect.flatMap(StreamManager, (streams) => streams.stopSession(port)),
+  'collection:list': () => Effect.flatMap(DatabaseService, (database) => database.collection.list),
+  'collection:add': ({ name, source }) =>
+    Effect.flatMap(DatabaseService, (database) => database.collection.add(name, source)),
+  'collection:import': () => Effect.flatMap(CollectionService, (collection) => collection.import()),
+  'search:torrents': ({ query, category }) =>
+    Effect.flatMap(SearchService, (search) => search.search(query, category)),
+  'players:list': () => Effect.flatMap(PlayersService, (players) => players.list()),
+  'players:play': (request) => Effect.flatMap(PlayersService, (players) => players.play(request)),
+  'disclaimer:status': () =>
+    Effect.map(
+      Effect.flatMap(DatabaseService, (database) => database.meta.get('disclaimerAccepted')),
+      (value) => ({ accepted: value === true }),
+    ),
+  'disclaimer:accept': () =>
+    Effect.flatMap(DatabaseService, (database) => database.meta.set('disclaimerAccepted', true)),
+  'files:openDirectory': ({ target }) =>
+    Effect.flatMap(FilePickerService, (files) =>
+      Effect.gen(function* () {
+        const settings = yield* SettingsService
+        const key =
+          target === 'cache'
+            ? 'tmpLocation'
+            : target === 'downloads'
+              ? 'downloadsLocation'
+              : 'databaseLocation'
+        const path = yield* settings.get(key)
+        yield* files.openDirectory(path)
+      }),
+    ),
+  'collection:remove': ({ id }) =>
+    Effect.flatMap(DatabaseService, (database) => database.collection.remove(id)),
+  'collection:rename': ({ id, name }) =>
+    Effect.flatMap(DatabaseService, (database) => database.collection.rename(id, name)),
+  'torrents:list': () => Effect.flatMap(StreamManager, (streams) => streams.list),
+  'torrents:pause': ({ infoHash }) =>
+    Effect.flatMap(StreamManager, (streams) => streams.pause(infoHash)),
+  'torrents:resume': ({ infoHash }) =>
+    Effect.flatMap(StreamManager, (streams) => streams.resume(infoHash)),
+  'torrents:remove': ({ infoHash }) =>
+    Effect.flatMap(StreamManager, (streams) => streams.stop(infoHash)),
+} satisfies Handlers
 
-/** Browse results double as the media cache that Favorites and Watched read from. */
-function cachePage(database: DatabaseServiceShape, page: unknown): Effect.Effect<void, never> {
-  const results =
-    page !== null && typeof page === 'object' && 'results' in page
-      ? (page as { results?: unknown }).results
-      : undefined
-  if (!Array.isArray(results)) return Effect.void
-  const writes = results.flatMap((item) => {
-    if (item === null || typeof item !== 'object') return []
-    const record = item as Record<string, unknown>
-    const imdbId = typeof record.imdb_id === 'string' ? record.imdb_id : undefined
-    if (imdbId === undefined) return []
-    if (record.type === 'movie') return [database.media.putMovie(imdbId, item)]
-    if (record.type === 'show') {
-      const tvdbId = record.tvdb_id === undefined ? '' : String(record.tvdb_id)
-      return [database.media.putShow(imdbId, tvdbId, item)]
-    }
-    return []
-  })
-  return Effect.forEach(writes, (write) => write, { discard: true }).pipe(Effect.ignore)
-}
-
-/** Reads every service from the Effect context, then dispatches to `effectForServices`. */
-function effectFor(
+/** The table is homogeneous once decoded; the per-channel types were checked by `satisfies`. */
+function handlerFor(
   channel: IpcChannel,
-  payload: unknown,
+  request: unknown,
 ): Effect.Effect<unknown, IpcError, IpcServiceTags> {
-  return Effect.gen(function* () {
-    const services: IpcServices = {
-      settings: yield* SettingsService,
-      database: yield* DatabaseService,
-      providers: yield* ProvidersService,
-      window: yield* WindowService,
-      stream: yield* StreamManager,
-      files: yield* FilePickerService,
-      players: yield* PlayersService,
-      search: yield* SearchService,
-      local: yield* LocalFiles,
-      updates: yield* UpdatesService,
-    }
-    return yield* effectForServices(channel, services, payload)
-  })
+  const handler = handlers[channel] as (
+    request: unknown,
+  ) => Effect.Effect<unknown, IpcError, IpcServiceTags>
+  return handler(request)
 }
 
 /**
- * The only place `runPromise` is allowed to appear: every handler decodes its payload
- * against the shared contract, runs the service effect from the context, and returns a
- * result envelope. Failures cross as tagged data, never as thrown strings.
+ * The only place `runPromise` is allowed to appear: every handler decodes its payload against
+ * the shared contract, runs the table entry from the context, and returns a result envelope.
+ * Failures cross as tagged data, never as thrown strings.
  */
 export function registerIpc<R, ER>(
   port: IpcMainPort,
@@ -479,7 +253,10 @@ export function registerIpc<R, ER>(
   for (const channel of Object.keys(contracts) as IpcChannel[]) {
     port.handle(channel, async (_event: unknown, payload: unknown): Promise<IpcEnvelope> => {
       try {
-        const exit = await runner.runPromiseExit(effectFor(channel, payload))
+        const request = Schema.decodeUnknownSync(
+          contracts[channel].request as Schema.Schema<unknown>,
+        )(payload)
+        const exit = await runner.runPromiseExit(handlerFor(channel, request))
         if (Exit.isSuccess(exit)) {
           return { ok: true, value: exit.value }
         }
