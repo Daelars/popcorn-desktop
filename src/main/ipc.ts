@@ -8,7 +8,13 @@ import {
   type SubtitleError,
   type TorrentError,
 } from '../shared/errors'
-import { contracts, type IpcChannel, type IpcEnvelope, toIpcFailure } from '../shared/ipc'
+import {
+  contracts,
+  type IpcChannel,
+  type IpcEnvelope,
+  type IpcEventPayload,
+  toIpcFailure,
+} from '../shared/ipc'
 import type { DatabaseServiceShape } from './database'
 import type { LocalFilesShape } from './localfiles'
 import type { ProviderEntry } from './providers/registry'
@@ -457,9 +463,7 @@ export function registerIpc(port: IpcMainPort, services: IpcServices, runner: Ef
 /** Publishes push events (streaming progress) to a window; the renderer subscribes. */
 export function createEventPublisher(send: (channel: string, payload: unknown) => void) {
   return {
-    publishProgress: (
-      payload: Schema.Schema.Type<typeof import('../shared/ipc').events['streams:progress']>,
-    ) => {
+    publishProgress: (payload: IpcEventPayload<'streams:progress'>) => {
       send('streams:progress', payload)
     },
   }
