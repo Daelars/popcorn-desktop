@@ -1,7 +1,9 @@
 import { request as httpRequest } from 'node:http'
 import { Effect } from 'effect'
+import iconv from 'iconv-lite'
 import { describe, expect, it } from 'vitest'
 import { srtToVtt } from '../src/main/subtitles/convert'
+import { isSupportedFormat, searchQuery, subtitleText } from '../src/main/subtitles/opensubtitles'
 import { startSubtitleServer } from '../src/main/subtitles/server'
 
 const srt = [
@@ -56,6 +58,43 @@ describe('srtToVtt', () => {
 
   it('drops blocks without a valid timing line', () => {
     expect(srtToVtt('not a subtitle at all')).toBe('WEBVTT\n\n\n')
+  })
+})
+
+describe('episode-aware subtitle search', () => {
+  it('sends season, episode, the file hash and its size', () => {
+    const query = searchQuery({
+      imdbId: 'tt0944947',
+      season: '1',
+      episode: '2',
+      fileHash: 'abc',
+      fileSize: 42,
+    })
+    expect(query).toMatchObject({
+      imdbid: '0944947',
+      season: '1',
+      episode: '2',
+      moviehash: 'abc',
+      moviebytesize: '42',
+    })
+  })
+
+  it('accepts only the formats the converter supports', () => {
+    expect(isSupportedFormat('srt')).toBe(true)
+    expect(isSupportedFormat('VTT')).toBe(true)
+    expect(isSupportedFormat('sub')).toBe(false)
+    expect(isSupportedFormat('')).toBe(true)
+  })
+})
+
+describe('subtitle encoding', () => {
+  it('falls back to the language encoding and yields valid VTT', () => {
+    const cyrillic = ['1', '00:00:01,000 --> 00:00:04,000', 'Привет мир', ''].join('\r\n')
+    const buffer = iconv.encode(cyrillic, 'windows-1251')
+    const vtt = subtitleText(buffer, 'application/x-subrip', 'ru')
+    expect(vtt.startsWith('WEBVTT')).toBe(true)
+    expect(vtt).toContain('Привет мир')
+    expect(vtt).not.toContain('\uFFFD')
   })
 })
 

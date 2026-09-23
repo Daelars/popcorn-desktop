@@ -138,7 +138,11 @@ export const contracts = {
   },
   /** `update:subtitles`: the provider's language map for a title (code → download url). */
   'subtitles:list': {
-    request: Schema.Struct({ imdbId: Schema.String }),
+    request: Schema.Struct({
+      imdbId: Schema.String,
+      season: Schema.optional(Schema.String),
+      episode: Schema.optional(Schema.String),
+    }),
     response: Schema.Struct({
       subtitles: Schema.Record({ key: Schema.String, value: Schema.String }),
     }),
@@ -149,6 +153,8 @@ export const contracts = {
       imdbId: Schema.String,
       lang: Schema.String,
       origin: Schema.String,
+      season: Schema.optional(Schema.String),
+      episode: Schema.optional(Schema.String),
     }),
     response: Schema.Struct({ port: Schema.Number, url: Schema.String }),
   },
