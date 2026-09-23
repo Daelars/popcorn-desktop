@@ -69,3 +69,19 @@ it('writes a change through the settings channel', async () => {
     ).toBe(true)
   })
 })
+
+it('renders rows from the metadata and applies their conditions', async () => {
+  stubBridge({ httpApiEnabled: true, nativeWindowFrame: true })
+  renderSettings()
+
+  // `httpApiEnabled` reveals the port row once the snapshot has loaded.
+  await waitFor(() => {
+    expect(screen.getByLabelText('HTTP API Port')).toBeInTheDocument()
+  })
+  // A select row whose options live in the layout metadata.
+  expect(screen.getByRole('combobox', { name: 'Default Filters' })).toBeInTheDocument()
+  // The restart hint comes from `apply: 'restart'`.
+  expect(screen.getAllByText('Please restart your application').length).toBeGreaterThan(0)
+  // A seedbox-only row stays hidden without the Seedbox feature.
+  expect(screen.queryByLabelText('Active Torrents Limit')).toBeNull()
+})
