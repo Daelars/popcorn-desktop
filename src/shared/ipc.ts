@@ -342,6 +342,8 @@ export const events = {
     downloaded: Schema.Number,
     uploaded: Schema.Number,
     speed: Schema.Number,
+    /** Bytes per second, not the `uploaded` total; the loading screen shows "upload speed". */
+    uploadSpeed: Schema.Number,
     peers: Schema.Number,
     progress: Schema.Number,
     /** Torrent size, so the player can render "1.2 GB / 3.8 GB" like the legacy did. */

@@ -6,6 +6,7 @@ export interface LoadingProgress {
   readonly downloaded: number
   readonly length: number
   readonly speed: number
+  readonly uploadSpeed: number
   readonly uploaded: number
   readonly peers: number
   readonly timeRemaining: number
@@ -120,7 +121,7 @@ export function LoadingScreen({
                 <br />
               </span>
               <span className="loading-info-text">{t('Upload')}:&nbsp;</span>
-              <span className="upload_speed value">{fileSize(progress?.uploaded ?? 0)}/s</span>
+              <span className="upload_speed value">{fileSize(progress?.uploadSpeed ?? 0)}/s</span>
               <br />
               <span className="loading-info-text" id="ractpr">
                 {t('Active Peers')}:&nbsp;
