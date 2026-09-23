@@ -1,5 +1,5 @@
 import { Schema } from 'effect'
-import { FetchResult, Filters, Provider, ProviderFilters } from './provider'
+import { FetchResult, Filters, Provider, TabFilters } from './provider'
 import type { Settings, SettingsKey } from './settings'
 
 /** Request/response contracts for every IPC channel. Validated on both sides. */
@@ -75,12 +75,12 @@ export const contracts = {
     response: Schema.Array(Provider),
   },
   'browse:fetch': {
-    request: Schema.Struct({ provider: Schema.String, filters: Filters }),
+    request: Schema.Struct({ tab: Schema.String, filters: Filters }),
     response: FetchResult,
   },
   'browse:filters': {
-    request: Schema.Struct({ provider: Schema.String }),
-    response: ProviderFilters,
+    request: Schema.Struct({ tab: Schema.String }),
+    response: TabFilters,
   },
   'media:getMovie': {
     request: Schema.Struct({ imdbId: Schema.String }),

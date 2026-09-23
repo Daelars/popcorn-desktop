@@ -60,7 +60,7 @@ async function harness() {
 
   // One test Layer supplies every service the IPC handlers read from the context.
   const fakes = Layer.mergeAll(
-    Layer.succeed(ProvidersService, []),
+    Layer.succeed(ProvidersService, { entries: Effect.succeed([]) }),
     Layer.succeed(WindowService, {
       minimize: () => Effect.void,
       maximize: () => Effect.void,
@@ -303,15 +303,15 @@ describe('registerIpc', () => {
     await runtime.dispose()
   })
 
-  it('lists the provider registry and rejects unknown providers as data', async () => {
+  it('lists the provider registry and rejects an unknown tab as data', async () => {
     const { runtime, invoke } = await harness()
     expect(await invoke('browse:providers', {})).toEqual({ ok: true, value: [] })
-    expect(await invoke('browse:fetch', { provider: 'nope', filters: {} })).toEqual({
+    expect(await invoke('browse:fetch', { tab: 'movie', filters: {} })).toEqual({
       ok: false,
       error: {
         tag: 'ProviderError',
-        message: 'unknown provider',
-        context: { provider: 'nope', operation: 'fetch' },
+        message: 'unknown tab',
+        context: { provider: 'movie', operation: 'fetch' },
       },
     })
     await runtime.dispose()

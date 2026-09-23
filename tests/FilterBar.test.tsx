@@ -11,9 +11,10 @@ beforeAll(async () => {
 
 const options = {
   genres: { All: 'All', Action: 'Action' },
-  sorters: { trending: 'Trending' },
+  sorters: { popularity: 'Trending' },
   types: { All: 'All', '1080p': '1080p' },
   ratings: { All: 'All', r9: '9+' },
+  capabilities: { search: true, sort: ['popularity'] as const, quality: false, genres: true },
 }
 
 function renderBar(overrides: Record<string, unknown> = {}) {
@@ -22,13 +23,7 @@ function renderBar(overrides: Record<string, unknown> = {}) {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <FilterBar
-          filters={{ order: -1 }}
-          onChange={onChange}
-          options={options}
-          supportsQualityFilters={false}
-          {...overrides}
-        />
+        <FilterBar filters={{ order: -1 }} onChange={onChange} options={options} {...overrides} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -44,12 +39,25 @@ it('reports genre, sorter and search changes through the legacy dropdowns', () =
 
   fireEvent.click(screen.getByLabelText('Sort by'))
   fireEvent.click(screen.getByRole('button', { name: 'Trending' }))
-  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ sorter: 'trending' }))
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ sorter: 'popularity' }))
 
   // `filter_bar.js` applied the search on submit and reset the genre.
   fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'dune' } })
   fireEvent.submit(screen.getByLabelText('Search').closest('form') as HTMLFormElement)
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ keywords: 'dune', genre: '' }))
+})
+
+it('hides search and genre when the capabilities do not include them', () => {
+  renderBar({
+    options: {
+      genres: { All: 'All' },
+      sorters: {},
+      capabilities: { search: false, sort: [], quality: false, genres: false },
+    },
+  })
+  expect(screen.queryByLabelText('Search')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Genre')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Sort by')).not.toBeInTheDocument()
 })
 
 it('shows the type and rating dropdowns only for providers that support them', () => {

@@ -1,5 +1,6 @@
-﻿import { Context, Effect, Layer } from 'effect'
+﻿import { Context, Effect, Layer, Stream, SubscriptionRef } from 'effect'
 import type { Movie, Provider, Show } from '../../shared'
+import type { Settings } from '../../shared/settings'
 import { SettingsService } from '../settings'
 import { ANIME_API_CONFIG, AnimeApi } from './anime'
 import type { BaseProvider } from './base'
@@ -109,9 +110,14 @@ export function createRegistry(options: RegistryOptions): ReadonlyArray<Provider
   return entries
 }
 
+/** The live provider list; it re-reads Settings when a relevant key changes. */
+export interface ProvidersShape {
+  readonly entries: Effect.Effect<ReadonlyArray<ProviderEntry>>
+}
+
 export class ProvidersService extends Context.Tag('ProvidersService')<
   ProvidersService,
-  ReadonlyArray<ProviderEntry>
+  ProvidersShape
 >() {}
 
 /** A non-empty environment override for a provider's API base URL. */
@@ -127,38 +133,53 @@ function firstServer(value: string): string | undefined {
     .find((part) => part !== '')
 }
 
+/** Builds the entry list from a settings snapshot plus the env overrides. */
+function buildRegistry(snapshot: Settings): ReadonlyArray<ProviderEntry> {
+  const language = snapshot.language === '' ? 'en' : snapshot.language
+
+  const apiUrls: Partial<Record<ProviderId, string>> = {}
+  const movies =
+    firstServer(snapshot.customMoviesServer) ?? envOverride(process.env.POPCORN_MOVIES_API)
+  const series = firstServer(snapshot.customSeriesServer) ?? envOverride(process.env.POPCORN_TV_API)
+  const anime =
+    firstServer(snapshot.customAnimeServer) ?? envOverride(process.env.POPCORN_ANIME_API)
+  const yts = envOverride(process.env.POPCORN_YTS_API)
+  if (movies !== undefined) apiUrls.movies = movies
+  if (yts !== undefined) apiUrls.yts = yts
+  if (series !== undefined) apiUrls.tv = series
+  if (anime !== undefined) apiUrls.anime = anime
+
+  return createRegistry({
+    apiUrls,
+    tmdbKey: snapshot.tmdb.api_key,
+    language,
+    contentLanguage: snapshot.contentLanguage === '' ? language : snapshot.contentLanguage,
+    contentLangOnly: snapshot.contentLangOnly,
+  })
+}
+
 /**
  * Builds the registry from settings, with the `POPCORN_*_API` environment variables kept as
  * development overrides. A `custom*Server` setting wins when set, as it did in the legacy app.
+ * It subscribes to the settings change stream, so a custom server applies without a restart.
  */
-export const ProvidersServiceLive = Layer.effect(
+export const ProvidersServiceLive = Layer.scoped(
   ProvidersService,
   Effect.gen(function* () {
     const settings = yield* SettingsService
-    const snapshot = yield* settings.snapshot
-    const language = snapshot.language === '' ? 'en' : snapshot.language
+    const initial = yield* settings.snapshot
+    const ref = yield* SubscriptionRef.make(buildRegistry(initial))
 
-    const apiUrls: Partial<Record<ProviderId, string>> = {}
-    const movies =
-      firstServer(snapshot.customMoviesServer) ?? envOverride(process.env.POPCORN_MOVIES_API)
-    const series =
-      firstServer(snapshot.customSeriesServer) ?? envOverride(process.env.POPCORN_TV_API)
-    const anime =
-      firstServer(snapshot.customAnimeServer) ?? envOverride(process.env.POPCORN_ANIME_API)
-    const yts = envOverride(process.env.POPCORN_YTS_API)
-    if (movies !== undefined) apiUrls.movies = movies
-    if (yts !== undefined) apiUrls.yts = yts
-    if (series !== undefined) apiUrls.tv = series
-    if (anime !== undefined) apiUrls.anime = anime
-
-    return ProvidersService.of(
-      createRegistry({
-        apiUrls,
-        tmdbKey: snapshot.tmdb.api_key,
-        language,
-        contentLanguage: snapshot.contentLanguage === '' ? language : snapshot.contentLanguage,
-        contentLangOnly: snapshot.contentLangOnly,
-      }),
+    yield* settings.changes.pipe(
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          const snapshot = yield* settings.snapshot
+          yield* SubscriptionRef.set(ref, buildRegistry(snapshot))
+        }),
+      ),
+      Effect.forkScoped,
     )
+
+    return ProvidersService.of({ entries: SubscriptionRef.get(ref) })
   }),
 )
