@@ -10,6 +10,8 @@ declare module 'webtorrent' {
     readonly length: number
     readonly path: string
     createReadStream(options?: { start?: number; end?: number }): Readable
+    select(priority?: number): void
+    deselect(): void
   }
 
   export interface WebTorrentTorrent {
@@ -17,6 +19,7 @@ declare module 'webtorrent' {
     readonly name: string
     readonly length: number
     readonly files: ReadonlyArray<WebTorrentFile>
+    readonly pieces: ReadonlyArray<unknown>
     readonly downloaded: number
     readonly uploaded: number
     readonly downloadSpeed: number
@@ -32,7 +35,8 @@ declare module 'webtorrent' {
     off(event: 'download', listener: (bytes: number) => void): this
     off(event: 'error', listener: (error: Error) => void): this
     off(event: 'ready', listener: () => void): this
-    select(index: number, priority?: number): void
+    select(start: number, end: number, priority?: number): void
+    deselect(start: number, end: number): void
     pause(): void
     resume(): void
     destroy(callback?: () => void): void
