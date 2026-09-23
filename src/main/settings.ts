@@ -249,6 +249,11 @@ function fieldSchema(key: string): Schema.Schema<unknown> | undefined {
   return (SettingsFields as Record<string, Schema.Schema<unknown>>)[key]
 }
 
+/** The TMDB API key a settings service holds, for the resolver's metadata lookups. */
+export function tmdbApiKey(settings: SettingsServiceShape): Effect.Effect<string> {
+  return Effect.map(settings.get('tmdb'), (tmdb) => tmdb.api_key)
+}
+
 /**
  * Persisted values are validated per key; a bad row falls back to its default rather
  * than bricking startup. The cast is contained: every surviving entry was decoded by
