@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream'
 import { Effect } from 'effect'
-import type { WebTorrentTorrent } from 'webtorrent'
 import { describe, expect, it } from 'vitest'
+import type { WebTorrentTorrent } from 'webtorrent'
 import { type SettingsEnvironment, settingsDefaults } from '../src/main/settings'
 import { parseRange } from '../src/main/torrent'
 import { handleOf, liveLimits } from '../src/main/webtorrent-engine'
