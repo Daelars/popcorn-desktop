@@ -1,5 +1,5 @@
-import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { Cause, Effect, Exit, Layer, ManagedRuntime, Stream } from 'effect'
+import { describe, expect, it, vi } from 'vitest'
 import { CatalogServiceLive } from '../src/main/catalog'
 import { CollectionServiceLive } from '../src/main/collection'
 import { DatabaseServiceLive, SqliteLive, SqliteSettingsStoreLive } from '../src/main/database'
@@ -14,7 +14,7 @@ import { LegacyMigration } from '../src/main/legacy-migration'
 import { LocalFiles } from '../src/main/localfiles'
 import { NOT_MIGRATED } from '../src/main/migration'
 import { PlaybackTargets } from '../src/main/playback-targets'
-import { PlayersService, playerArgs, playerCommand } from '../src/main/players'
+import { launchPlayer, PlayersService, playerArgs, playerCommand } from '../src/main/players'
 import { ProvidersService } from '../src/main/providers/registry'
 import { SearchService } from '../src/main/search'
 import { type SettingsEnvironment, SettingsServiceLive } from '../src/main/settings'
@@ -24,6 +24,7 @@ import { SubtitlesServiceLive } from '../src/main/subtitles/service'
 import { UpdatesService } from '../src/main/updates'
 import { WindowService } from '../src/main/window'
 import type { PlaybackTarget } from '../src/shared'
+import { PlaybackError } from '../src/shared/errors'
 import type { IpcEnvelope } from '../src/shared/ipc'
 
 const environment: SettingsEnvironment = {
@@ -158,20 +159,31 @@ describe('external players', () => {
   const vlc = { id: 'VLC', type: 'vlc', path: '/Applications/VLC.app' }
   const bsplayer = { id: 'BSPlayer', type: 'bsplayer', path: 'C:/BSPlayer/bsplayer.exe' }
 
-  it('passes switches, fullscreen, title and url as separate argv entries', () => {
+  it('passes switches, fullscreen, title and url as argv entries', () => {
     expect(
       playerArgs(vlc, {
         url: 'http://127.0.0.1:41000/0',
         title: 'A Movie',
         fullscreen: true,
       }),
+    ).toEqual(['--no-video-title-show', '-f', '--meta-title=A Movie', 'http://127.0.0.1:41000/0'])
+  })
+
+  it('passes a joined subtitle switch as one argument with no literal quotes', () => {
+    expect(
+      playerArgs(vlc, { url: 'http://127.0.0.1:41000/0', subtitle: '/tmp/my subs/file.srt' }),
     ).toEqual([
       '--no-video-title-show',
-      '-f',
-      '--meta-title=',
-      'A Movie',
+      '--sub-file=/tmp/my subs/file.srt',
       'http://127.0.0.1:41000/0',
     ])
+  })
+
+  it('passes a separate subtitle switch as its own argument for the mplayer family', () => {
+    const mplayer = { id: 'MPlayer', type: 'mplayer', path: 'C:/mplayer/mplayer.exe' }
+    expect(
+      playerArgs(mplayer, { url: 'http://127.0.0.1:41000/0', subtitle: '/tmp/file.srt' }),
+    ).toEqual(['--really-quiet', '-sub', '/tmp/file.srt', 'http://127.0.0.1:41000/0'])
   })
 
   it('keeps BSPlayer url-first argument order', () => {
@@ -193,6 +205,28 @@ describe('external players', () => {
         path: '/var/lib/flatpak/app/org.videolan.VLC/current/active/files/bin/vlc',
       }),
     ).toEqual({ file: '/usr/bin/flatpak', prefix: ['run', 'org.videolan.VLC'] })
+  })
+})
+
+describe('launchPlayer', () => {
+  it('resolves once the process starts and reports its exit separately', async () => {
+    const node = { id: 'node', type: 'node', path: process.execPath }
+    const exits: Array<number | null> = []
+
+    await Effect.runPromise(launchPlayer(node, ['-e', '0'], { onExit: (code) => exits.push(code) }))
+
+    await vi.waitFor(() => expect(exits).toEqual([0]))
+  })
+
+  it('fails with a tagged PlaybackError when the binary cannot start', async () => {
+    const missing = { id: 'mpv', type: 'mpv', path: 'C:/nope/missing-mpv.exe' }
+
+    const exit = await Effect.runPromiseExit(launchPlayer(missing, ['http://127.0.0.1:1/0']))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : undefined
+    expect(failure?._tag).toBe('Some')
+    if (failure?._tag === 'Some') expect(failure.value).toBeInstanceOf(PlaybackError)
   })
 })
 
@@ -341,6 +375,7 @@ describe('createEventPublisher', () => {
       downloaded: 1,
       uploaded: 2,
       speed: 3,
+      uploadSpeed: 5,
       peers: 4,
       progress: 0.5,
       length: 100,
@@ -357,6 +392,7 @@ describe('createEventPublisher', () => {
           downloaded: 1,
           uploaded: 2,
           speed: 3,
+          uploadSpeed: 5,
           peers: 4,
           progress: 0.5,
           length: 100,

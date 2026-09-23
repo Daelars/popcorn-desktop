@@ -104,7 +104,8 @@ export function PlayerPage() {
       ...(subtitleLang === '' ? {} : { subtitleLang }),
       ...(backdrop === '' ? {} : { backdrop }),
     })
-    navigate(`/player?${query.toString()}`)
+    // Replace the current episode so closing the next one returns to where playback started.
+    navigate(`/player?${query.toString()}`, { replace: true })
   }
 
   useEffect(() => {

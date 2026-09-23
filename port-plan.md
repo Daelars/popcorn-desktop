@@ -271,19 +271,21 @@ Phase 7 tickets have no blockers and can run in parallel. After Phase 8, the pla
 
 ### Inert-key audit (10.3)
 
-From 10.1's `INERT_SETTINGS` — every key the port does not read, with its disposition. None are
-deleted here; they are either tracked against an open ticket or removed from the UI by that
-ticket when the feature lands.
+`INERT_SETTINGS` is derived from 10.1's metadata by scanning `src/main` and `src/renderer` for a
+reader of each key; a key referenced only by the schema, the metadata or the settings UI is inert.
+There are **59** such keys, each carrying an `inertReason`. None are deleted here; they are tracked
+against an open ticket, which removes the control when the feature lands.
 
-| Key | Disposition |
+| Keys | Disposition |
 |---|---|
 | `httpApiEnabled`, `httpApiPort`, `httpApiUsername`, `httpApiPassword` | JSON-RPC decision — #23 |
-| `translateTitle`, `translateEpisodes`, `translateSynopsis`, `translatePosters` | Translation/Trakt work — #23 |
-| `alwaysOnTop`, `minimizeToTray` | Window lifecycle parity — #58 |
-| `dht`, `dhtInfo`, `dhtEnable` | Torrent/DHT parity — #57 |
-| `maxActiveTorrents`, `streamPort`, `continueSeedingOnStart`, `deleteTmpOnClose`, `delSeedboxCache`, `separateDownloadsDir` | Seedbox/downloads parity — #57 |
-| `toggleSengines` | Browse/search parity — #56 |
-| `activateLoCtrl` | Player controls parity — #59 |
+| `activateWatchlist`, `traktStatus`, `traktLastSync`, `traktLastActivities`, `traktSyncOnStart`, `traktPlayback` | Trakt/watchlist — #23 |
+| `translateTitle`, `translateEpisodes`, `translateSynopsis`, `translatePosters` | Translation — #23 |
+| `toggleSengines`, `enable1337xSearch`, `enableSolidTorrentsSearch`, `enableTgxtorrentSearch`, `defaultFilters`, `lastTab` | Browse/search parity — #56 |
+| `dht`, `dhtInfo`, `dhtEnable`, `maxActiveTorrents`, `totalDownloaded`, `totalUploaded`, `streamPort`, `continueSeedingOnStart`, `proxyServer`, `deleteTmpOnClose`, `delSeedboxCache`, `separateDownloadsDir`, `activateTorrentCollection` | Torrent/seedbox parity — #57 |
+| `alwaysOnTop`, `minimizeToTray`, `dbversion`, `defaultWidth`, `defaultHeight`, `updateNotification`, `updateEndpoint`, `updateKey`, `statusUrl`, `commitUrl` | Settings/lifecycle parity — #58 |
+| `multipleExtSubtitles`, `opensubtitlesAuthenticated`, `alwaysFullscreen`, `preloadNextEpisodeTime`, `activateLoCtrl`, `audioPassthrough` | Player controls parity — #59 |
+| `postersMinWidth`, `postersMaxWidth`, `postersMinFontSize`, `postersMaxFontSize`, `postersJump`, `watchedCovers`, `tv_detail_jump_to`, `ratingStars`, `showAdvancedSettings`, `alwaysShowBookmarks` | Visual/UI parity — #59 (13.4) |
 
 
 ## Decisions so far

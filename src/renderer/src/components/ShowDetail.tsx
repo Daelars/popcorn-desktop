@@ -344,6 +344,8 @@ export function ShowDetail({ show }: { show: Show }) {
           <div className="sdo-watch">
             <div id="quality-selector">
               <QualitySelector
+                // Remount per episode: the selector's chosen quality is episode-specific.
+                key={selected === undefined ? 'none' : `${selected.season}-${selected.episode}`}
                 torrents={selected?.torrents ?? {}}
                 defaultQualityKey="shows_default_quality"
                 onSelect={(quality, torrent) => setChosen([quality, torrent])}

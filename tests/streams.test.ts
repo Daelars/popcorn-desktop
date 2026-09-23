@@ -180,6 +180,7 @@ describe('PlaybackTargets', () => {
       downloaded: 1,
       uploaded: 0,
       speed: 1,
+      uploadSpeed: 0,
       peers: 1,
       progress: 0.5,
       length: 10,
@@ -220,14 +221,14 @@ describe('PlaybackTargets', () => {
 
     const targets = await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.list))
     expect(targets.map((target) => target.id)).toEqual(['local', 'VLC'])
+    const [local, external] = targets
+    if (local === undefined || external === undefined) {
+      throw new Error('expected a local and an external target')
+    }
 
     // Local is a no-op; external hands the session URL to the player.
-    await runtime.runPromise(
-      Effect.flatMap(PlaybackTargets, (t) => t.play(targets[0]!, 'session-1')),
-    )
-    await runtime.runPromise(
-      Effect.flatMap(PlaybackTargets, (t) => t.play(targets[1]!, 'session-1')),
-    )
+    await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.play(local, 'session-1')))
+    await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.play(external, 'session-1')))
     expect(launched).toEqual(['VLC'])
 
     await runtime.dispose()
