@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { openDatabase } from '../src/main/database'
-import { migrateLegacy } from '../src/main/migration'
+import { migrateLegacy, resolveLegacyProfileRoot } from '../src/main/migration'
 
 function fixtureProfile(): { legacyRoot: string; backupDir: string } {
   const root = mkdtempSync(join(tmpdir(), 'popcorn-legacy-'))
@@ -114,5 +114,58 @@ describe('migrateLegacy', () => {
     expect(result.migrated).toBe(true)
     expect(result.counts.bookmarks).toBe(0)
     expect(result.skipped).toEqual([])
+  })
+})
+
+describe('resolveLegacyProfileRoot', () => {
+  const appData = join('home', 'appdata')
+  const base = join(appData, 'Popcorn-Time')
+  const existsIn =
+    (...paths: string[]) =>
+    (candidate: string) =>
+      paths.includes(candidate)
+
+  it('prefers `User Data\\Default` on Windows when it holds data', () => {
+    const resolution = resolveLegacyProfileRoot(
+      appData,
+      'win32',
+      existsIn(join(base, 'User Data', 'Default', 'data'), join(base, 'data')),
+    )
+    expect(resolution.root).toBe(join(base, 'User Data', 'Default'))
+  })
+
+  it('falls back to `User\\Default` on Windows when the first candidate is empty', () => {
+    const resolution = resolveLegacyProfileRoot(
+      appData,
+      'win32',
+      existsIn(join(base, 'User', 'Default', 'data')),
+    )
+    expect(resolution.root).toBe(join(base, 'User', 'Default'))
+  })
+
+  it('falls back to the bare app directory on Windows', () => {
+    const resolution = resolveLegacyProfileRoot(appData, 'win32', existsIn(join(base, 'data')))
+    expect(resolution.root).toBe(base)
+  })
+
+  it('reports every checked path when no candidate exists', () => {
+    const resolution = resolveLegacyProfileRoot(appData, 'win32', () => false)
+    expect(resolution.root).toBeUndefined()
+    expect(resolution.checked).toEqual([
+      join(base, 'User Data', 'Default'),
+      join(base, 'User', 'Default'),
+      base,
+    ])
+  })
+
+  it('uses the `Default` profile on macOS and Linux', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      const resolution = resolveLegacyProfileRoot(
+        appData,
+        platform,
+        existsIn(join(base, 'Default', 'data')),
+      )
+      expect(resolution.root).toBe(join(base, 'Default'))
+    }
   })
 })

@@ -1,4 +1,5 @@
 ﻿import { writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
 import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
@@ -11,7 +12,7 @@ import {
 } from './database'
 import { type ExternalPlayersPort, registerIpc } from './ipc'
 import { LocalFiles, LocalFilesLive } from './localfiles'
-import { migrateLegacy } from './migration'
+import { migrateLegacy, resolveLegacyProfileRoot } from './migration'
 import { launchPlayer, playerArgs, playerSearchPaths, scanPlayers } from './players'
 import { createRegistry } from './providers/registry'
 import { SEARCH_PROVIDERS, searchTorrents } from './search'
@@ -55,10 +56,11 @@ function settingsEnvironment(): SettingsEnvironment {
   }
 }
 
-/** NW.js wrote its profile beside the app in the local app data directory. */
-function legacyProfileRoot(): string {
-  const base = process.env.LOCALAPPDATA ?? app.getPath('appData')
-  return join(base, 'Popcorn-Time')
+/** The platform's application-data root, where NW.js kept its `Popcorn-Time` profile. */
+function legacyAppDataRoot(): string {
+  if (process.platform === 'win32') return process.env.LOCALAPPDATA ?? app.getPath('appData')
+  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support')
+  return process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config')
 }
 
 /** The legacy UI scaling: percent mapped onto Electron's 1.2-step zoom levels. */
@@ -218,22 +220,30 @@ async function startServices() {
     Layer.mergeAll(settings, database, sqlite, streams, LocalFilesLive),
   )
 
-  await runtime.runPromise(
-    Effect.gen(function* () {
-      const db = yield* Sqlite
-      yield* Effect.sync(() =>
-        migrateLegacy(db, legacyProfileRoot(), {
-          backupDir: join(app.getPath('userData'), 'backup', `legacy-${Date.now()}`),
-        }),
-      )
-    }).pipe(
-      Effect.catchAll((error) =>
-        Effect.sync(() => {
-          console.error('[migration] failed; continuing with an empty database', error)
-        }),
+  const legacy = resolveLegacyProfileRoot(legacyAppDataRoot(), process.platform)
+  const legacyRoot = legacy.root
+  if (legacyRoot === undefined) {
+    console.warn(
+      `[migration] no legacy profile with data/ found; checked ${legacy.checked.join(', ')}`,
+    )
+  } else {
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* Sqlite
+        yield* Effect.sync(() =>
+          migrateLegacy(db, legacyRoot, {
+            backupDir: join(app.getPath('userData'), 'backup', `legacy-${Date.now()}`),
+          }),
+        )
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.sync(() => {
+            console.error('[migration] failed; continuing with an empty database', error)
+          }),
+        ),
       ),
-    ),
-  )
+    )
+  }
 
   const settingsService = await runtime.runPromise(SettingsService)
   const snapshot = await runtime.runPromise(
