@@ -9,15 +9,18 @@ import {
   type TorrentError,
 } from '../shared/errors'
 import { contracts, type IpcChannel, type IpcEnvelope, toIpcFailure } from '../shared/ipc'
-import type { DatabaseServiceShape } from './database'
-import type { LocalFilesShape } from './localfiles'
-import type { ProviderEntry } from './providers/registry'
+import { DatabaseService, type DatabaseServiceShape } from './database'
+import { FilePickerService } from './file-picker'
+import { LocalFiles, type LocalFilesShape } from './localfiles'
+import { PlayersService } from './players'
+import { type ProviderEntry, ProvidersService } from './providers/registry'
 import { resolveItem } from './resolve'
-import type { SearchOutcome } from './search'
-import type { SettingsServiceShape } from './settings'
-import type { StreamManagerShape } from './streams'
+import { type SearchOutcome, SearchService } from './search'
+import { SettingsService, type SettingsServiceShape } from './settings'
+import { StreamManager, type StreamManagerShape } from './streams'
 import { fetchSubtitle, searchSubtitles } from './subtitles/opensubtitles'
-import type { UpdatesShape } from './updates'
+import { UpdatesService, type UpdatesShape } from './updates'
+import { WindowService } from './window'
 
 /** The Electron `ipcMain` surface we depend on — fakeable in tests. */
 export interface IpcMainPort {
@@ -77,15 +80,22 @@ export interface WindowControls {
   readonly setSize: (width: number, height: number) => Effect.Effect<void>
 }
 
-/** The composition root satisfies this with a ManagedRuntime. */
-export interface EffectRunner {
-  readonly runPromiseExit: <A>(
-    effect: Effect.Effect<
-      A,
-      SettingsError | DbError | ProviderError | TorrentError | SubtitleError,
-      never
-    >,
-  ) => Promise<Exit.Exit<A, SettingsError | DbError | ProviderError | TorrentError | SubtitleError>>
+/** Every service an IPC handler reads from the Effect context. */
+export type IpcServiceTags =
+  | SettingsService
+  | DatabaseService
+  | ProvidersService
+  | WindowService
+  | StreamManager
+  | FilePickerService
+  | PlayersService
+  | SearchService
+  | LocalFiles
+  | UpdatesService
+
+/** The composition root satisfies this with the ManagedRuntime over the AppLayer. */
+export interface EffectRunner<R, ER> {
+  readonly runPromiseExit: <A, E>(effect: Effect.Effect<A, E, R>) => Promise<Exit.Exit<A, E | ER>>
 }
 
 type IpcError = SettingsError | DbError | ProviderError | TorrentError | SubtitleError
@@ -106,7 +116,7 @@ function readString(
   return settings.read(key).pipe(Effect.map((value) => (typeof value === 'string' ? value : '')))
 }
 
-function effectFor(
+function effectForServices(
   channel: IpcChannel,
   services: IpcServices,
   payload: unknown,
@@ -428,16 +438,41 @@ function cachePage(database: DatabaseServiceShape, page: unknown): Effect.Effect
   return Effect.forEach(writes, (write) => write, { discard: true }).pipe(Effect.ignore)
 }
 
+/** Reads every service from the Effect context, then dispatches to `effectForServices`. */
+function effectFor(
+  channel: IpcChannel,
+  payload: unknown,
+): Effect.Effect<unknown, IpcError, IpcServiceTags> {
+  return Effect.gen(function* () {
+    const services: IpcServices = {
+      settings: yield* SettingsService,
+      database: yield* DatabaseService,
+      providers: yield* ProvidersService,
+      window: yield* WindowService,
+      stream: yield* StreamManager,
+      files: yield* FilePickerService,
+      players: yield* PlayersService,
+      search: yield* SearchService,
+      local: yield* LocalFiles,
+      updates: yield* UpdatesService,
+    }
+    return yield* effectForServices(channel, services, payload)
+  })
+}
+
 /**
  * The only place `runPromise` is allowed to appear: every handler decodes its payload
- * against the shared contract, runs the service effect, and returns a result envelope.
- * Failures cross as tagged data, never as thrown strings.
+ * against the shared contract, runs the service effect from the context, and returns a
+ * result envelope. Failures cross as tagged data, never as thrown strings.
  */
-export function registerIpc(port: IpcMainPort, services: IpcServices, runner: EffectRunner): void {
+export function registerIpc<R, ER>(
+  port: IpcMainPort,
+  runner: EffectRunner<R & IpcServiceTags, ER>,
+): void {
   for (const channel of Object.keys(contracts) as IpcChannel[]) {
     port.handle(channel, async (_event: unknown, payload: unknown): Promise<IpcEnvelope> => {
       try {
-        const exit = await runner.runPromiseExit(effectFor(channel, services, payload))
+        const exit = await runner.runPromiseExit(effectFor(channel, payload))
         if (Exit.isSuccess(exit)) {
           return { ok: true, value: exit.value }
         }

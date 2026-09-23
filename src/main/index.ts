@@ -1,25 +1,15 @@
-﻿import { writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
+﻿import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
-import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
-import {
-  DatabaseService,
-  DatabaseServiceLive,
-  SqliteLive,
-  SqliteSettingsStoreLive,
-} from './database'
-import { type ExternalPlayersPort, registerIpc } from './ipc'
-import { LocalFiles, LocalFilesLive } from './localfiles'
-import { LegacyMigrationLive, resolveLegacyProfileRoot } from './migration'
-import { launchPlayer, playerArgs, playerSearchPaths, scanPlayers } from './players'
-import { createRegistry } from './providers/registry'
-import { SEARCH_PROVIDERS, searchTorrents } from './search'
-import { type SettingsEnvironment, SettingsService, SettingsServiceLive } from './settings'
-import { StreamManager, StreamManagerLive } from './streams'
-import { TorrentServiceLive } from './torrent'
-import { createAutoUpdaterPort, createUpdates } from './updates'
-import { WebTorrentEngineLive } from './webtorrent-engine'
+import { Effect, ManagedRuntime, Stream } from 'effect'
+import { app, BrowserWindow, ipcMain, screen, session, shell } from 'electron'
+import { makeAppLayer } from './app'
+import { registerIpc } from './ipc'
+import { resolveLegacyProfileRoot } from './migration'
+import { type SettingsEnvironment, SettingsService } from './settings'
+import { smokePlay, smokeTest } from './smoke'
+import { StreamManager } from './streams'
+import { createAutoUpdaterPort, UpdatesService } from './updates'
+import { zoomLevelFor } from './window'
 
 const RELEASE_NAME = 'Now.. Bring me that Horizon'
 
@@ -55,11 +45,6 @@ function legacyAppDataRoot(): string {
   if (process.platform === 'win32') return process.env.LOCALAPPDATA ?? app.getPath('appData')
   if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support')
   return process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config')
-}
-
-/** The legacy UI scaling: percent mapped onto Electron's 1.2-step zoom levels. */
-function zoomLevelFor(percent: number): number {
-  return Math.log(percent / 100) / Math.log(1.2)
 }
 
 /**
@@ -126,7 +111,7 @@ function sendOpenTarget(target: string): void {
   window.webContents.send('window:openFile', target)
 }
 
-function createWindow(zoomPercent: number): BrowserWindow {
+function createWindow(): BrowserWindow {
   applyContentSecurityPolicy()
   const window = new BrowserWindow({
     width: 960,
@@ -145,8 +130,6 @@ function createWindow(zoomPercent: number): BrowserWindow {
       sandbox: false,
     },
   })
-
-  window.webContents.setZoomLevel(zoomLevelFor(zoomPercent))
 
   window.on('ready-to-show', () => {
     window.show()
@@ -174,318 +157,82 @@ function createWindow(zoomPercent: number): BrowserWindow {
   return window
 }
 
-async function startServices() {
+/**
+ * Builds the one AppLayer, starts the one ManagedRuntime and registers the IPC handlers.
+ * Every service comes from the Layer graph; nothing is pulled out by hand.
+ */
+function startApp() {
   const environment = settingsEnvironment()
-  const sqlite = SqliteLive(join(app.getPath('userData'), 'popcorn.sqlite'))
-
   const legacy = resolveLegacyProfileRoot(legacyAppDataRoot(), process.platform)
   if (legacy.root === undefined) {
     console.warn(
       `[migration] no legacy profile with data/ found; checked ${legacy.checked.join(', ')}`,
     )
   }
-  const migration = LegacyMigrationLive({
+
+  const layer = makeAppLayer({
+    settings: environment,
+    sqliteFile: join(app.getPath('userData'), 'popcorn.sqlite'),
     legacyRoot: legacy.root,
     backupDir: join(app.getPath('userData'), 'backup', `legacy-${Date.now()}`),
-    onError: (error) => {
-      console.error('[migration] failed; continuing with an empty database', error)
-    },
-  }).pipe(Layer.provide(sqlite))
-
-  // Settings depends on LegacyMigration, so building it runs migration before any read.
-  const settings = SettingsServiceLive(environment).pipe(
-    Layer.provide(SqliteSettingsStoreLive.pipe(Layer.provide(sqlite))),
-    Layer.provide(migration),
-  )
-  const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
-  // The engine reads the connection settings from Settings when the layer is built.
-  const streams = StreamManagerLive.pipe(
-    Layer.provide(TorrentServiceLive.pipe(Layer.provide(WebTorrentEngineLive))),
-  )
-
-  const core = Layer.mergeAll(settings, database, sqlite, LocalFilesLive)
-  const runtime = ManagedRuntime.make(Layer.mergeAll(core, streams.pipe(Layer.provide(core))))
-
-  const settingsService = await runtime.runPromise(SettingsService)
-  const snapshot = await runtime.runPromise(
-    Effect.flatMap(SettingsService, (service) => service.snapshot),
-  )
-  const language = snapshot.language === '' ? 'en' : snapshot.language
-  const registry = createRegistry({
-    apiUrls: {
-      ...(process.env.POPCORN_MOVIES_API === undefined
-        ? {}
-        : { movies: process.env.POPCORN_MOVIES_API }),
-      ...(process.env.POPCORN_YTS_API === undefined ? {} : { yts: process.env.POPCORN_YTS_API }),
-      ...(process.env.POPCORN_TV_API === undefined ? {} : { tv: process.env.POPCORN_TV_API }),
-      ...(process.env.POPCORN_ANIME_API === undefined
-        ? {}
-        : { anime: process.env.POPCORN_ANIME_API }),
-    },
-    tmdbKey: snapshot.tmdb.api_key,
-    language,
-    contentLanguage: snapshot.contentLanguage === '' ? language : snapshot.contentLanguage,
-    contentLangOnly: snapshot.contentLangOnly,
-  })
-
-  const streamManager = await runtime.runPromise(StreamManager)
-  const externalPlayers = await runtime.runPromise(
-    scanPlayers(playerSearchPaths(process.platform, process.env)),
-  )
-  runtime.runFork(
-    Stream.runForEach(streamManager.progress, (progress) =>
-      Effect.sync(() => {
-        for (const window of BrowserWindow.getAllWindows()) {
-          window.webContents.send('streams:progress', progress)
-        }
-      }),
-    ),
-  )
-
-  const services = {
-    settings: settingsService,
-    database: await runtime.runPromise(DatabaseService),
-    providers: registry,
-    stream: streamManager,
-    local: await runtime.runPromise(LocalFiles),
+    platform: process.platform,
+    environment: process.env,
     // Updates only exist in a packaged build; POPCORN_UPDATE_URL exercises the flow unpacked.
-    updates: createUpdates(
+    updatePort:
       app.isPackaged || process.env.POPCORN_UPDATE_URL !== undefined
         ? createAutoUpdaterPort()
         : undefined,
-      (status) => {
-        for (const window of BrowserWindow.getAllWindows()) {
-          window.webContents.send('updates:status', status)
-        }
-      },
-    ),
-    window: {
-      minimize: () => Effect.sync(() => BrowserWindow.getFocusedWindow()?.minimize()),
-      maximize: () =>
-        Effect.sync(() => {
-          const focused = BrowserWindow.getFocusedWindow()
-          if (focused?.isMaximized() === true) focused.unmaximize()
-          else focused?.maximize()
-        }),
-      close: () => Effect.sync(() => BrowserWindow.getFocusedWindow()?.close()),
-      setZoom: (percent: number) =>
-        Effect.sync(() => {
-          const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-          window?.webContents.setZoomLevel(zoomLevelFor(percent))
-        }),
-      setSize: (width: number, height: number) =>
-        Effect.sync(() => {
-          const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-          window?.setSize(Math.round(width), Math.round(height))
-        }),
-    },
-    files: {
-      pickTorrent: () =>
-        Effect.tryPromise(async () => {
-          const result = await dialog.showOpenDialog({
-            properties: ['openFile'],
-            filters: [{ name: 'Torrent', extensions: ['torrent'] }],
-          })
-          return result.canceled ? undefined : result.filePaths[0]
-        }).pipe(Effect.orElseSucceed(() => undefined)),
-      openDirectory: (path: string) =>
-        Effect.tryPromise(() => shell.openPath(path)).pipe(
-          Effect.asVoid,
-          Effect.orElseSucceed(() => undefined),
-        ),
-    },
-    search: {
-      search: (query: string, category: string) =>
-        Effect.gen(function* () {
-          const enabledKeys = yield* Effect.forEach(
-            SEARCH_PROVIDERS,
-            (provider) =>
-              Effect.map(
-                settingsService.get(provider.setting),
-                (value) => [provider.id, value] as const,
-              ),
-            { concurrency: 'unbounded' },
-          )
-          const enabled = new Map(enabledKeys)
-          return yield* searchTorrents(
-            SEARCH_PROVIDERS,
-            (provider) => enabled.get(provider.id) !== false,
-            query,
-            category,
-          )
-        }),
-    },
-    players: {
-      list: () => Effect.succeed(externalPlayers),
-      play: (request: Parameters<ExternalPlayersPort['play']>[0]) =>
-        Effect.gen(function* () {
-          const player = externalPlayers.find((candidate) => candidate.id === request.playerId)
-          if (player === undefined) return
-          const args = playerArgs(player, {
-            url: request.url,
-            ...(request.subtitle === undefined ? {} : { subtitle: request.subtitle }),
-            ...(request.title === undefined ? {} : { title: request.title }),
-            fullscreen: request.fullscreen === true,
-            utf8Subtitle: true,
-          })
-          yield* launchPlayer(player, args)
-        }),
-    },
-  }
-  registerIpc(ipcMain, services, runtime)
-
-  return { runtime, zoomPercent: snapshot.bigPicture, updates: services.updates }
-}
-
-/**
- * Diagnostic hook: with `POPCORN_SMOKE_MAGNET` set, the app loads that torrent through the
- * real stream service inside Electron, logs the outcome and quits. Used to test playback
- * in the packaged runtime rather than in plain Node.
- */
-async function smokeTest(
-  runtime: Awaited<ReturnType<typeof startServices>>['runtime'],
-): Promise<void> {
-  const magnet = process.env.POPCORN_SMOKE_MAGNET ?? ''
-  const downloadPath = app.getPath('temp')
-  const started = Date.now()
-  try {
-    const probe = await runtime.runPromise(
-      Effect.flatMap(StreamManager, (streams) => streams.files(magnet, downloadPath)),
-    )
-    console.log(
-      `[smoke] OK after ${Date.now() - started}ms: ${probe.files.length} files, first=${probe.files[0]?.name}`,
-    )
-  } catch (error) {
-    console.error(`[smoke] FAILED after ${Date.now() - started}ms:`, error)
-  }
-  app.quit()
-}
-
-/**
- * Renderer half of the smoke test: `POPCORN_SMOKE_PLAY` is a magnet and `POPCORN_SMOKE_FILE`
- * an optional file index. Drives the window to the player route and logs what video.js did
- * (attached element, ready state, decoded frame size) so playback can be checked headlessly.
- */
-async function smokePlay(window: BrowserWindow, magnet: string, fileIndex: number): Promise<void> {
-  const started = Date.now()
-  const route = `#/player?source=${encodeURIComponent(magnet)}&file=${fileIndex}&title=Smoke`
-  try {
-    // StartScreen redirects to the configured start route once settings load, which would
-    // override this hash; give it a moment to land before navigating.
-    await new Promise((resolve) => setTimeout(resolve, 5000))
-    const headerState = await window.webContents.executeJavaScript(`(() => {
-      const rect = (selector) => {
-        const element = document.querySelector(selector)
-        if (element === null) return null
-        const box = element.getBoundingClientRect()
-        return [Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]
+    publishUpdate: (status) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        window.webContents.send('updates:status', status)
       }
-      const header = document.querySelector('#header')
-      return {
-        header: rect('#header'),
-        titlebar: rect('.windows-titlebar'),
-        filterBar: rect('.filter-bar'),
-        drag: header === null ? null : getComputedStyle(header).getPropertyValue('-webkit-app-region'),
-      }
-    })()`)
-    console.log(`[smoke:header] ${JSON.stringify(headerState)}`)
-    const headerShot = await window.webContents.capturePage()
-    await writeFile(join(app.getPath('temp'), 'popcorn-header.png'), headerShot.toPNG())
-    await window.webContents.executeJavaScript(`
-      window.addEventListener('error', (event) => {
-        console.log('[smoke:error]', event.message, event.filename + ':' + event.lineno, event.error && event.error.stack)
-      })
-      window.addEventListener('unhandledrejection', (event) => {
-        console.log('[smoke:error] rejection', String((event.reason && event.reason.stack) || event.reason))
-      })
-      window.addEventListener('hashchange', () => {
-        console.log('[smoke:hash]', window.location.hash, String(new Error().stack).split('\\n').slice(1, 4).join(' | '))
-      })
-      document.addEventListener('fullscreenchange', () => {
-        console.log('[smoke:fs]', document.fullscreenElement ? document.fullscreenElement.className : 'exit', String(new Error().stack).split('\\n').slice(1, 5).join(' | '))
-      })
-      for (const name of ['pushState', 'replaceState']) {
-        const original = history[name].bind(history)
-        history[name] = (...args) => {
-          console.log('[smoke:history]', name, String(args[2]), String(new Error().stack).split('\\n').slice(1, 4).join(' | '))
-          return original(...args)
-        }
-      }
-      void 0;
-    `)
-    await window.webContents.executeJavaScript(`window.location.hash = ${JSON.stringify(route)}`)
-    console.log(
-      `[smoke:play] navigated to`,
-      await window.webContents.executeJavaScript('window.location.hash'),
-    )
-    let capturedEarly = false
-    for (let second = 1; second <= 60; second++) {
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      const state = (await window.webContents.executeJavaScript(`(() => {
-        const wrapper = document.getElementById('video_player')
-        const video = document.querySelector('.vjs-tech')
-        const rect = (element) => {
-          if (element === null || element === undefined) return null
-          const box = element.getBoundingClientRect()
-          const style = getComputedStyle(element)
-          return {
-            x: Math.round(box.x), y: Math.round(box.y),
-            w: Math.round(box.width), h: Math.round(box.height),
-            position: style.position, display: style.display,
+    },
+    onMigrationError: (error) => {
+      console.error('[migration] failed; continuing with an empty database', error)
+    },
+  })
+
+  const runtime = ManagedRuntime.make(layer)
+  registerIpc(ipcMain, runtime)
+
+  // Forward each session's progress to every window.
+  runtime.runFork(
+    Stream.runForEach(
+      Stream.unwrap(Effect.map(StreamManager, (manager) => manager.progress)),
+      (progress) =>
+        Effect.sync(() => {
+          for (const window of BrowserWindow.getAllWindows()) {
+            window.webContents.send('streams:progress', progress)
           }
-        }
-        if (video === null || video === undefined) {
-          return { found: false, hash: window.location.hash, wrapper: rect(wrapper) }
-        }
-        return {
-          found: true,
-          attached: document.contains(video),
-          readyState: video.readyState,
-          networkState: video.networkState,
-          currentTime: Math.round(video.currentTime * 10) / 10,
-          duration: Number.isFinite(video.duration) ? Math.round(video.duration) : null,
-          paused: video.paused,
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-          error: video.error ? video.error.message || String(video.error.code) : null,
-          currentSrc: video.currentSrc,
-          buffered: video.buffered.length,
-          wrapper: rect(wrapper),
-          video: rect(video),
-          controlBar: rect(document.querySelector('.vjs-control-bar:not(.player-header-background)')),
-        }
-      })()`)) as Record<string, unknown>
-      console.log(`[smoke:play] ${second}s`, JSON.stringify(state))
-      if (second === 8) {
-        const image = await window.webContents.capturePage()
-        const shot = join(app.getPath('temp'), 'popcorn-player.png')
-        await writeFile(shot, image.toPNG())
-        console.log(`[smoke:play] screenshot written to ${shot}`)
-      }
-      if (state.attached === true && Number(state.currentTime ?? 0) > 2 && !capturedEarly) {
-        capturedEarly = true
-        const image = await window.webContents.capturePage()
-        const shot = join(app.getPath('temp'), 'popcorn-player-playing.png')
-        await writeFile(shot, image.toPNG())
-        console.log(`[smoke:play] PLAYING after ${Date.now() - started}ms, screenshot ${shot}`)
-      }
-      if (state.attached === true && Number(state.currentTime ?? 0) > 12) {
-        const image = await window.webContents.capturePage()
-        const shot = join(app.getPath('temp'), 'popcorn-player-later.png')
-        await writeFile(shot, image.toPNG())
-        console.log(`[smoke:play] PLAYING 12s in, screenshot ${shot}`)
-        break
-      }
-      if (state.error !== null && state.error !== undefined) {
-        console.error(`[smoke:play] player error after ${Date.now() - started}ms`)
-        break
-      }
-    }
-  } catch (error) {
-    console.error(`[smoke:play] FAILED after ${Date.now() - started}ms:`, error)
-  }
-  // POPCORN_SMOKE_KEEP leaves the app up so an external CDP client can inspect the renderer.
-  if (process.env.POPCORN_SMOKE_KEEP === undefined) app.quit()
+        }),
+    ),
+  )
+
+  return runtime
+}
+
+type AppRuntime = ReturnType<typeof startApp>
+
+/** Applies the configured UI scale once settings are available. */
+function applyZoom(runtime: AppRuntime, window: BrowserWindow): void {
+  runtime.runFork(
+    Effect.flatMap(SettingsService, (settings) => settings.get('bigPicture')).pipe(
+      Effect.tap((percent) =>
+        Effect.sync(() => window.webContents.setZoomLevel(zoomLevelFor(percent))),
+      ),
+    ),
+  )
+}
+
+/** Checks on start-up once the renderer can hear the status, then every six hours. */
+function scheduleUpdates(runtime: AppRuntime, window: BrowserWindow): void {
+  window.webContents.once('did-finish-load', () => {
+    runtime.runFork(Effect.flatMap(UpdatesService, (updates) => updates.check(false)))
+  })
+  setInterval(
+    () => runtime.runFork(Effect.flatMap(UpdatesService, (updates) => updates.check(false))),
+    6 * 60 * 60 * 1000,
+  ).unref()
 }
 
 // A second launch hands its target to the running window instead of opening another window.
@@ -507,10 +254,10 @@ app.on('open-file', (event, path) => {
 
 void app.whenReady().then(async () => {
   if (!singleInstance) return
-  const { runtime, zoomPercent, updates } = await startServices()
+  const runtime = startApp()
 
   if (process.env.POPCORN_SMOKE_PLAY !== undefined) {
-    const window = createWindow(zoomPercent)
+    const window = createWindow()
     // Forward the renderer console and crash details; without them a dead renderer is silent.
     window.webContents.on('console-message', (event) => {
       const detail = event as unknown as { message?: string; lineNumber?: number }
@@ -537,21 +284,19 @@ void app.whenReady().then(async () => {
     return
   }
 
-  createWindow(zoomPercent)
+  const window = createWindow()
+  applyZoom(runtime, window)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      const window = createWindow(zoomPercent)
+      const next = createWindow()
+      applyZoom(runtime, next)
 
       // `nw.App.argv.pop()`: the first launch may carry a file or link to open.
       const initialTarget = openTarget(process.argv)
       if (initialTarget !== undefined) sendOpenTarget(initialTarget)
 
-      // Check on start-up once the renderer can hear the status, then every six hours.
-      window.webContents.once('did-finish-load', () => {
-        runtime.runFork(updates.check(false))
-      })
-      setInterval(() => runtime.runFork(updates.check(false)), 6 * 60 * 60 * 1000).unref()
+      scheduleUpdates(runtime, next)
     }
   })
 
