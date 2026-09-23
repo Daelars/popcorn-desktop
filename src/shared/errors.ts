@@ -36,6 +36,11 @@ export class MigrationError extends Data.TaggedError('MigrationError')<
   ErrorFields & { readonly operation: string }
 > {}
 
+/** A playback target that could not be started or reached. */
+export class PlaybackError extends Data.TaggedError('PlaybackError')<
+  ErrorFields & { readonly target: string; readonly operation: string }
+> {}
+
 export class SettingsError extends Data.TaggedError('SettingsError')<
   ErrorFields & { readonly key: string }
 > {}
@@ -47,4 +52,5 @@ export type ServiceError =
   | DbError
   | DeviceError
   | MigrationError
+  | PlaybackError
   | SettingsError

@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import { Cause, Chunk, Effect, Exit, Option, Schema, Stream } from 'effect'
 import {
   DbError,
+  PlaybackError,
   type ProviderError,
   type SettingsError,
   type SubtitleError,
@@ -22,7 +23,7 @@ import { CollectionService } from './collection'
 import { DatabaseService } from './database'
 import { FilePickerService } from './file-picker'
 import { LocalFiles } from './localfiles'
-import { PlayersService } from './players'
+import { PlaybackTargets } from './playback-targets'
 import { ProvidersService } from './providers/registry'
 import { resolveItem } from './resolve'
 import { SearchService } from './search'
@@ -65,7 +66,7 @@ export type IpcServiceTags =
   | WindowService
   | StreamSession
   | FilePickerService
-  | PlayersService
+  | PlaybackTargets
   | SearchService
   | LocalFiles
   | UpdatesService
@@ -77,7 +78,13 @@ export interface EffectRunner<R, ER> {
   readonly runPromiseExit: <A, E>(effect: Effect.Effect<A, E, R>) => Promise<Exit.Exit<A, E | ER>>
 }
 
-type IpcError = SettingsError | DbError | ProviderError | TorrentError | SubtitleError
+type IpcError =
+  | SettingsError
+  | DbError
+  | ProviderError
+  | TorrentError
+  | SubtitleError
+  | PlaybackError
 
 /** webtorrent writes into the download path, so it has to exist before a torrent loads. */
 function ensureDirectory(path: string): Effect.Effect<void, DbError> {
@@ -224,8 +231,27 @@ const handlers = {
   'collection:import': () => Effect.flatMap(CollectionService, (collection) => collection.import()),
   'search:torrents': ({ query, category }) =>
     Effect.flatMap(SearchService, (search) => search.search(query, category)),
-  'players:list': () => Effect.flatMap(PlayersService, (players) => players.list()),
-  'players:play': (request) => Effect.flatMap(PlayersService, (players) => players.play(request)),
+  'playback:targets': () => Effect.flatMap(PlaybackTargets, (targets) => targets.list),
+  'playback:play': ({ targetId, sessionId, title, subtitle, fullscreen }) =>
+    Effect.flatMap(PlaybackTargets, (targets) =>
+      Effect.gen(function* () {
+        const target = (yield* targets.list).find((candidate) => candidate.id === targetId)
+        if (target === undefined) {
+          return yield* Effect.fail(
+            new PlaybackError({
+              message: `unknown playback target ${targetId}`,
+              target: targetId,
+              operation: 'play',
+            }),
+          )
+        }
+        yield* targets.play(target, sessionId, {
+          ...(title === undefined ? {} : { title }),
+          ...(subtitle === undefined ? {} : { subtitle }),
+          ...(fullscreen === undefined ? {} : { fullscreen }),
+        })
+      }),
+    ),
   'disclaimer:status': () =>
     Effect.map(
       Effect.flatMap(DatabaseService, (database) => database.meta.get('disclaimerAccepted')),

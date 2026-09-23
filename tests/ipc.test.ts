@@ -13,6 +13,7 @@ import {
 import { LegacyMigration } from '../src/main/legacy-migration'
 import { LocalFiles } from '../src/main/localfiles'
 import { NOT_MIGRATED } from '../src/main/migration'
+import { PlaybackTargets } from '../src/main/playback-targets'
 import { PlayersService, playerArgs, playerCommand } from '../src/main/players'
 import { ProvidersService } from '../src/main/providers/registry'
 import { SearchService } from '../src/main/search'
@@ -22,6 +23,7 @@ import { StreamSession } from '../src/main/stream-session'
 import { SubtitlesServiceLive } from '../src/main/subtitles/service'
 import { UpdatesService } from '../src/main/updates'
 import { WindowService } from '../src/main/window'
+import type { PlaybackTarget } from '../src/shared'
 import type { IpcEnvelope } from '../src/shared/ipc'
 
 const environment: SettingsEnvironment = {
@@ -61,6 +63,16 @@ async function harness() {
   // One test Layer supplies every service the IPC handlers read from the context.
   const fakes = Layer.mergeAll(
     Layer.succeed(ProvidersService, { entries: Effect.succeed([]) }),
+    Layer.succeed(PlaybackTargets, {
+      list: Effect.succeed<ReadonlyArray<PlaybackTarget>>([
+        { kind: 'local', id: 'local', name: 'Popcorn Time' },
+      ]),
+      play: (_target, sessionId) =>
+        Effect.succeed({
+          target: { kind: 'local' as const, id: 'local' as const, name: 'Popcorn Time' },
+          sessionId,
+        }),
+    }),
     Layer.succeed(WindowService, {
       minimize: () => Effect.void,
       maximize: () => Effect.void,
@@ -100,6 +112,7 @@ async function harness() {
     Layer.succeed(StreamSession, {
       open: () => Effect.succeed({ id: 'session-1' }),
       states: () => Stream.empty,
+      current: () => Effect.succeed(undefined),
       stateEvents: Stream.empty,
       close: () => Effect.void,
       closeAll: () => Effect.void,
@@ -251,16 +264,16 @@ describe('registerIpc', () => {
     await runtime.dispose()
   })
 
-  it('lists external players and forwards a launch', async () => {
-    const { runtime, invoke, launched } = await harness()
-    expect(await invoke('players:list', {})).toEqual({
+  it('lists playback targets and forwards a play', async () => {
+    const { runtime, invoke } = await harness()
+    expect(await invoke('playback:targets', {})).toEqual({
       ok: true,
-      value: [{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }],
+      value: [{ kind: 'local', id: 'local', name: 'Popcorn Time' }],
     })
-    expect(
-      await invoke('players:play', { playerId: 'VLC', url: 'http://127.0.0.1:41000/0' }),
-    ).toEqual({ ok: true, value: undefined })
-    expect(launched).toEqual([{ playerId: 'VLC', url: 'http://127.0.0.1:41000/0' }])
+    expect(await invoke('playback:play', { targetId: 'local', sessionId: 'session-1' })).toEqual({
+      ok: true,
+      value: undefined,
+    })
     await runtime.dispose()
   })
 

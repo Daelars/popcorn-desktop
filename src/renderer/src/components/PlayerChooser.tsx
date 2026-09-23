@@ -6,7 +6,7 @@ import { popcorn } from '../bridge'
 import { notify } from '../notify'
 import { useSetting } from '../settings'
 
-type ExternalPlayer = IpcResponse<'players:list'>[number]
+type PlaybackTarget = IpcResponse<'playback:targets'>[number]
 
 interface ChooserItem {
   readonly id: string
@@ -21,8 +21,8 @@ function iconOf(item: ChooserItem): string {
 
 /**
  * `player-chooser.tpl` with the device chooser from `generic.js`/`ext_player.js`: Watch Now
- * starts the selected device, the caret lists Popcorn Time plus every external player, and
- * the choice is persisted as `chosenPlayer`.
+ * starts the selected device, the caret lists every playback target, and the choice is
+ * persisted as `chosenPlayer` (a target id).
  */
 export function PlayerChooser({ onWatch }: { readonly onWatch: () => void }) {
   const { t } = useTranslation()
@@ -31,22 +31,17 @@ export function PlayerChooser({ onWatch }: { readonly onWatch: () => void }) {
   const [open, setOpen] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
-  const players = useQuery({
-    queryKey: ['players'],
-    queryFn: async (): Promise<ReadonlyArray<ExternalPlayer>> => {
-      const bridge = popcorn()
-      return bridge.invoke('players:list', {})
-    },
+  const targets = useQuery({
+    queryKey: ['playback-targets'],
+    queryFn: async (): Promise<ReadonlyArray<PlaybackTarget>> =>
+      popcorn().invoke('playback:targets', {}),
   })
 
-  const items: ReadonlyArray<ChooserItem> = [
-    { id: 'local', name: 'Popcorn Time', type: 'local' },
-    ...(players.data ?? []).map((player) => ({
-      id: player.id,
-      name: player.id,
-      type: `external-${player.type}`,
-    })),
-  ]
+  const items: ReadonlyArray<ChooserItem> = (targets.data ?? []).map((target) => ({
+    id: target.id,
+    name: target.name,
+    type: target.kind === 'local' ? 'local' : `external-${target.type}`,
+  }))
   const selected = items.find((item) => item.id === chosen) ?? items[0]
   if (selected === undefined) return null
 
@@ -57,7 +52,7 @@ export function PlayerChooser({ onWatch }: { readonly onWatch: () => void }) {
 
   const refresh = () => {
     setRefreshing(true)
-    void queryClient.invalidateQueries({ queryKey: ['players'] }).finally(() => {
+    void queryClient.invalidateQueries({ queryKey: ['playback-targets'] }).finally(() => {
       window.setTimeout(() => setRefreshing(false), 800)
     })
   }
