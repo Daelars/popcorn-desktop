@@ -247,15 +247,24 @@ export const WebTorrentEngineLive = Layer.scoped(
         }),
     )
     // Live apply: connection and speed limit changes reach the running client in one tick.
+    // Only the runtime-tunable keys matter; DHT/secure stay constructor options.
+    const liveKeys: ReadonlySet<string> = new Set([
+      'connectionLimit',
+      'downloadLimit',
+      'uploadLimit',
+      'maxLimitMult',
+    ])
     yield* settings.changes.pipe(
-      Stream.runForEach(() =>
-        Effect.gen(function* () {
-          const current = yield* settings.snapshot
-          const limits = liveLimits(current)
-          client.maxConns = limits.maxConns
-          client.throttleDownload(limits.downloadLimit)
-          client.throttleUpload(limits.uploadLimit)
-        }),
+      Stream.runForEach((change) =>
+        liveKeys.has(change.key)
+          ? Effect.gen(function* () {
+              const current = yield* settings.snapshot
+              const limits = liveLimits(current)
+              client.maxConns = limits.maxConns
+              client.throttleDownload(limits.downloadLimit)
+              client.throttleUpload(limits.uploadLimit)
+            })
+          : Effect.void,
       ),
       Effect.forkScoped,
     )
