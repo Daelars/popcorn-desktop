@@ -9,7 +9,7 @@ import {
   SqliteLive,
   SqliteSettingsStoreLive,
 } from './database'
-import { type ExternalPlayersPort, registerIpc } from './ipc'
+import { createEventPublisher, type ExternalPlayersPort, registerIpc } from './ipc'
 import { LocalFiles, LocalFilesLive } from './localfiles'
 import { migrateLegacy } from './migration'
 import { launchPlayer, playerArgs, playerSearchPaths, scanPlayers } from './players'
@@ -261,13 +261,14 @@ async function startServices() {
   const externalPlayers = await runtime.runPromise(
     scanPlayers(playerSearchPaths(process.platform, process.env)),
   )
+  const publisher = createEventPublisher((channel, payload) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send(channel, payload)
+    }
+  })
   runtime.runFork(
     Stream.runForEach(streamManager.progress, (progress) =>
-      Effect.sync(() => {
-        for (const window of BrowserWindow.getAllWindows()) {
-          window.webContents.send('streams:progress', progress)
-        }
-      }),
+      Effect.sync(() => publisher.publishProgress(progress)),
     ),
   )
 
