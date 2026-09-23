@@ -35,6 +35,55 @@ const EMPTY_COUNTS: MigrationCounts = {
   shows: 0,
 }
 
+const LEGACY_APP_NAME = 'Popcorn-Time'
+
+/**
+ * NW.js stores its profile in the platform's application-data root, but the exact
+ * subdirectory moved across 0.5.x builds. Candidates, most specific first:
+ *
+ * - Windows: `%LOCALAPPDATA%\Popcorn-Time\{User Data\Default, User\Default}`,
+ *   verified on a real 0.5.1 profile, then the bare app directory.
+ * - macOS: `~/Library/Application Support/Popcorn-Time/{Default, User Data/Default}`.
+ * - Linux: `~/.config/Popcorn-Time/{Default, User Data/Default}`.
+ *
+ * The bare app directory is the path `nw.App.dataPath` returns per the NW.js docs.
+ * The legacy NeDB files live in `<profile>/data`.
+ */
+export function legacyProfileCandidates(
+  appDataRoot: string,
+  platform: NodeJS.Platform,
+): ReadonlyArray<string> {
+  const base = join(appDataRoot, LEGACY_APP_NAME)
+  const nested =
+    platform === 'win32'
+      ? [join(base, 'User Data', 'Default'), join(base, 'User', 'Default')]
+      : [join(base, 'Default'), join(base, 'User Data', 'Default')]
+  return [...nested, base]
+}
+
+export interface LegacyRootResolution {
+  /** The first candidate holding a `data/` directory, or undefined if none do. */
+  readonly root: string | undefined
+  /** Every candidate checked, in order, so the caller can log them. */
+  readonly checked: ReadonlyArray<string>
+}
+
+/**
+ * Finds the NW.js profile that actually contains the legacy NeDB database.
+ * `exists` is injectable so tests don't touch the filesystem.
+ */
+export function resolveLegacyProfileRoot(
+  appDataRoot: string,
+  platform: NodeJS.Platform,
+  exists: (path: string) => boolean = existsSync,
+): LegacyRootResolution {
+  const checked = legacyProfileCandidates(appDataRoot, platform)
+  for (const candidate of checked) {
+    if (exists(join(candidate, 'data'))) return { root: candidate, checked }
+  }
+  return { root: undefined, checked }
+}
+
 /**
  * NeDB files are JSON-lines. Corrupt lines are counted and skipped rather than
  * aborting the migration — a half-written legacy file must not lose the rest.
