@@ -11,9 +11,8 @@ import { ProvidersServiceLive } from './providers/registry'
 import { SearchServiceLive } from './search'
 import { type SettingsEnvironment, SettingsServiceLive } from './settings'
 import { SettingsEffectsLive } from './settings-effects'
-import { StreamManagerLive } from './streams'
+import { StreamSessionLive } from './stream-session'
 import { SubtitlesServiceLive } from './subtitles/service'
-import { TorrentServiceLive } from './torrent'
 import { type UpdatePort, UpdatesServiceLive } from './updates'
 import { WebTorrentEngineLive } from './webtorrent-engine'
 import { WindowServiceLive } from './window'
@@ -48,10 +47,7 @@ export const makeAppLayer = (input: AppLayerInput) => {
   )
   const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
   const core = Layer.mergeAll(settings, database, sqlite, LocalFilesLive, migration)
-  const streams = StreamManagerLive.pipe(
-    Layer.provide(TorrentServiceLive.pipe(Layer.provide(WebTorrentEngineLive))),
-    Layer.provide(core),
-  )
+  const streams = StreamSessionLive.pipe(Layer.provide(WebTorrentEngineLive), Layer.provide(core))
   const search = SearchServiceLive.pipe(Layer.provide(settings))
   const providers = ProvidersServiceLive.pipe(Layer.provide(settings))
   const players = PlayersServiceLive({

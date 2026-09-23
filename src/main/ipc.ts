@@ -1,11 +1,11 @@
 import { mkdir } from 'node:fs/promises'
-import { Cause, Chunk, Effect, Exit, Schema } from 'effect'
+import { Cause, Chunk, Effect, Exit, Option, Schema, Stream } from 'effect'
 import {
   DbError,
   type ProviderError,
   type SettingsError,
   type SubtitleError,
-  type TorrentError,
+  TorrentError,
 } from '../shared/errors'
 import {
   contracts,
@@ -28,7 +28,7 @@ import { resolveItem } from './resolve'
 import { SearchService } from './search'
 import { SettingsService, tmdbApiKey } from './settings'
 import { SettingsEffects } from './settings-effects'
-import { StreamManager } from './streams'
+import { StreamSession } from './stream-session'
 import { SubtitlesService } from './subtitles/service'
 import { UpdatesService } from './updates'
 import { WindowService } from './window'
@@ -63,7 +63,7 @@ export type IpcServiceTags =
   | ProvidersService
   | CatalogService
   | WindowService
-  | StreamManager
+  | StreamSession
   | FilePickerService
   | PlayersService
   | SearchService
@@ -161,33 +161,52 @@ const handlers = {
   'updates:download': () => Effect.flatMap(UpdatesService, (updates) => updates.download()),
   'updates:install': () => Effect.flatMap(UpdatesService, (updates) => updates.install()),
   'stream:files': ({ torrentId }) =>
-    Effect.flatMap(StreamManager, (streams) =>
+    Effect.flatMap(StreamSession, (sessions) =>
       Effect.gen(function* () {
         const settings = yield* SettingsService
         const downloadPath = yield* settings.get('tmpLocation')
         yield* ensureDirectory(downloadPath)
-        const probe = yield* streams.files(torrentId, downloadPath)
+        const probe = yield* sessions.files(torrentId, downloadPath)
         // Only serialisable fields may cross the boundary; the probe keeps a live handle.
         return { infoHash: probe.infoHash, files: probe.files }
       }),
     ),
   'stream:start': (request) =>
-    Effect.flatMap(StreamManager, (streams) =>
+    Effect.flatMap(StreamSession, (sessions) =>
       Effect.gen(function* () {
         const settings = yield* SettingsService
         const downloadPath = yield* settings.get('tmpLocation')
         yield* ensureDirectory(downloadPath)
-        return yield* streams.start({
-          torrentId: request.torrentId,
-          fileIndex: request.fileIndex,
+        const { id } = yield* sessions.open({
+          source: request.torrentId,
           downloadPath,
           origin: request.origin,
+          ...(request.fileIndex === undefined ? {} : { fileIndex: request.fileIndex }),
+          ...(request.fileHint === undefined ? {} : { fileHint: request.fileHint }),
+          ...(request.season === undefined ? {} : { season: request.season }),
+          ...(request.episode === undefined ? {} : { episode: request.episode }),
           ...(request.port === undefined ? {} : { port: request.port }),
         })
+        // Wait for the session to reach `ready` (or fail) before answering the renderer.
+        const done = yield* sessions.states(id).pipe(
+          Stream.filter((state) => state.state === 'ready' || state.state === 'failed'),
+          Stream.runHead,
+          Effect.timeout('60 seconds'),
+          Effect.map(Option.getOrUndefined),
+          Effect.catchTag('TimeoutException', () => Effect.succeed(undefined)),
+        )
+        if (done === undefined || done.state === 'failed') {
+          return yield* Effect.fail(
+            new TorrentError({
+              message: done?.message ?? 'stream did not start',
+              infoHash: request.torrentId,
+            }),
+          )
+        }
+        return { id, infoHash: done.infoHash, port: done.port, url: done.url }
       }),
     ),
-  'stream:stop': ({ port }) =>
-    Effect.flatMap(StreamManager, (streams) => streams.stopSession(port)),
+  'stream:stop': ({ id }) => Effect.flatMap(StreamSession, (sessions) => sessions.close(id)),
   'collection:list': () => Effect.flatMap(DatabaseService, (database) => database.collection.list),
   'collection:add': ({ name, source }) =>
     Effect.flatMap(DatabaseService, (database) => database.collection.add(name, source)),
@@ -221,13 +240,13 @@ const handlers = {
     Effect.flatMap(DatabaseService, (database) => database.collection.remove(id)),
   'collection:rename': ({ id, name }) =>
     Effect.flatMap(DatabaseService, (database) => database.collection.rename(id, name)),
-  'torrents:list': () => Effect.flatMap(StreamManager, (streams) => streams.list),
+  'torrents:list': () => Effect.flatMap(StreamSession, (sessions) => sessions.list),
   'torrents:pause': ({ infoHash }) =>
-    Effect.flatMap(StreamManager, (streams) => streams.pause(infoHash)),
+    Effect.flatMap(StreamSession, (sessions) => sessions.pause(infoHash)),
   'torrents:resume': ({ infoHash }) =>
-    Effect.flatMap(StreamManager, (streams) => streams.resume(infoHash)),
+    Effect.flatMap(StreamSession, (sessions) => sessions.resume(infoHash)),
   'torrents:remove': ({ infoHash }) =>
-    Effect.flatMap(StreamManager, (streams) => streams.stop(infoHash)),
+    Effect.flatMap(StreamSession, (sessions) => sessions.closeAll(infoHash)),
 } satisfies Handlers
 
 /** The table is homogeneous once decoded; the per-channel types were checked by `satisfies`. */

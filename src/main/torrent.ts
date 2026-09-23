@@ -1,8 +1,8 @@
 ﻿import { readFile } from 'node:fs/promises'
 import type { Readable } from 'node:stream'
-import { Context, Effect, Layer, type Scope, type Stream } from 'effect'
+import { Context, Effect, type Stream } from 'effect'
 import { TorrentError } from '../shared/errors'
-import { type ByteRange, serveFile } from './file-server'
+import type { ByteRange } from './file-server'
 
 export type { ByteRange } from './file-server'
 export { parseRange } from './file-server'
@@ -89,81 +89,3 @@ export class TorrentEngine extends Context.Tag('TorrentEngine')<
   TorrentEngine,
   TorrentEngineShape
 >() {}
-
-export interface StreamRequest {
-  /** A magnet link, info hash, or a `file:<path>` collection entry. */
-  readonly torrentId: string
-  readonly fileIndex: number
-  readonly downloadPath: string
-  /** 0 or omitted picks an ephemeral port. */
-  readonly port?: number
-  /** The only origin allowed to receive CORS headers; never reflected blindly. */
-  readonly origin: string
-}
-
-export interface StreamSession {
-  readonly infoHash: string
-  readonly port: number
-  readonly url: string
-  readonly progress: Stream.Stream<TorrentProgress>
-  readonly handle: TorrentHandle
-}
-
-export interface TorrentServiceShape {
-  readonly start: (
-    request: StreamRequest,
-  ) => Effect.Effect<StreamSession, TorrentError, Scope.Scope>
-  /** Loads the torrent just far enough to list its files, then releases it. */
-  readonly probe: (
-    torrentId: string,
-    downloadPath: string,
-  ) => Effect.Effect<TorrentProbe, TorrentError>
-}
-
-export class TorrentService extends Context.Tag('TorrentService')<
-  TorrentService,
-  TorrentServiceShape
->() {}
-
-export const TorrentServiceLive = Layer.effect(
-  TorrentService,
-  Effect.map(TorrentEngine, (engine) =>
-    TorrentService.of({
-      start: (request) =>
-        Effect.gen(function* () {
-          const source = yield* readTorrentSource(request.torrentId)
-          const handle = yield* engine.load(source, request.downloadPath)
-          // A previous session may have paused this torrent; starting a stream resumes it.
-          yield* handle.resume
-          const file = yield* handle.select(request.fileIndex)
-          const served = yield* serveFile({
-            file,
-            fileIndex: request.fileIndex,
-            createStream: (range) => handle.createReadStream(request.fileIndex, range),
-            port: request.port ?? 0,
-            origin: request.origin,
-          })
-          return {
-            infoHash: handle.infoHash,
-            port: served.port,
-            url: served.url,
-            progress: handle.progress,
-            handle,
-          }
-        }),
-      probe: (torrentId, downloadPath) =>
-        Effect.gen(function* () {
-          const source = yield* readTorrentSource(torrentId)
-          const handle = yield* engine.load(source, downloadPath)
-          const files = handle.files.map((file, index) => ({
-            index,
-            name: file.name,
-            length: file.length,
-          }))
-          // Kept loaded: webtorrent crashes if a torrent is destroyed while its metadata
-          // handlers are still firing, and the stream start reuses it by info hash anyway.
-          return { infoHash: handle.infoHash, files, handle }
-        }),
-    }),
-  ),
-)

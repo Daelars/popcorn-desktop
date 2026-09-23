@@ -182,14 +182,23 @@ export const contracts = {
   'stream:start': {
     request: Schema.Struct({
       torrentId: Schema.String,
-      fileIndex: Schema.Number,
+      fileIndex: Schema.optional(Schema.Number),
+      fileHint: Schema.optional(Schema.String),
+      season: Schema.optional(Schema.String),
+      episode: Schema.optional(Schema.String),
       port: Schema.optional(Schema.Number),
       origin: Schema.String,
     }),
-    response: Schema.Struct({ infoHash: Schema.String, port: Schema.Number, url: Schema.String }),
+    /** The session id plus its ready URL; `streams:state` carries loading from then on. */
+    response: Schema.Struct({
+      id: Schema.String,
+      infoHash: Schema.String,
+      port: Schema.Number,
+      url: Schema.String,
+    }),
   },
   'stream:stop': {
-    request: Schema.Struct({ port: Schema.Number }),
+    request: Schema.Struct({ id: Schema.String }),
     response: Schema.Undefined,
   },
   'collection:list': {
@@ -337,6 +346,37 @@ export const UpdateStatus = Schema.Struct({
 })
 export type UpdateStatus = Schema.Schema.Type<typeof UpdateStatus>
 
+/** One playback session's state; the renderer drives LoadingScreen and the player from it. */
+export const StreamState = Schema.Struct({
+  id: Schema.String,
+  infoHash: Schema.String,
+  /** The legacy streamer.js states, in order, ending at closed or failed. */
+  state: Schema.Literal(
+    'connecting',
+    'startingDownload',
+    'downloading',
+    'waitingForSubtitles',
+    'ready',
+    'playingExternally',
+    'closed',
+    'failed',
+  ),
+  url: Schema.String,
+  port: Schema.Number,
+  /** The chosen file's name, once known. */
+  name: Schema.optional(Schema.String),
+  downloaded: Schema.Number,
+  uploaded: Schema.Number,
+  speed: Schema.Number,
+  peers: Schema.Number,
+  progress: Schema.Number,
+  length: Schema.Number,
+  timeRemaining: Schema.Number,
+  /** A short reason when `state` is `failed`. */
+  message: Schema.optional(Schema.String),
+})
+export type StreamState = Schema.Schema.Type<typeof StreamState>
+
 export const events = {
   'streams:progress': Schema.Struct({
     infoHash: Schema.String,
@@ -350,6 +390,8 @@ export const events = {
     /** Milliseconds left, as webtorrent estimates it. */
     timeRemaining: Schema.Number,
   }),
+  /** The legacy loading state machine, per session, tagged with the session id. */
+  'streams:state': StreamState,
   /** An OS "open with" target: a video path, a `.torrent` path, or a magnet/http url. */
   'window:openFile': Schema.String,
   'updates:status': UpdateStatus,
@@ -411,6 +453,8 @@ export interface PopcornBridge {
   readonly onProgress: (
     listener: (payload: IpcEventPayload<'streams:progress'>) => void,
   ) => () => void
+  /** The per-session loading state machine. */
+  readonly onState: (listener: (state: IpcEventPayload<'streams:state'>) => void) => () => void
   /** The OS handed the app a file or link to open (`nw.App.argv` / `nw.App.on('open')`). */
   readonly onOpenFile: (listener: (target: string) => void) => () => void
   /** Auto-update progress, from the electron-updater events. */

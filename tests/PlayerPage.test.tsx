@@ -91,7 +91,12 @@ function stubBridge(options: { show?: unknown; settings?: Record<string, unknown
       calls.push({ channel, payload })
       switch (channel) {
         case 'stream:start':
-          return { infoHash: 'hash-1', port: 41000, url: 'http://127.0.0.1:41000/0' }
+          return {
+            id: 'session-1',
+            infoHash: 'hash-1',
+            port: 41000,
+            url: 'http://127.0.0.1:41000/0',
+          }
         case 'media:getShow':
           return options.show
         case 'settings:all':

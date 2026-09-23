@@ -2,11 +2,11 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Effect } from 'effect'
 import { app, type BrowserWindow } from 'electron'
-import { StreamManager } from './streams'
+import { StreamSession } from './stream-session'
 
 /** The slice of the app runtime this diagnostic needs. */
 interface SmokeRuntime {
-  readonly runPromise: <A, E>(effect: Effect.Effect<A, E, StreamManager>) => Promise<A>
+  readonly runPromise: <A, E>(effect: Effect.Effect<A, E, StreamSession>) => Promise<A>
 }
 
 /**
@@ -21,7 +21,7 @@ export async function smokeTest(runtime: SmokeRuntime): Promise<void> {
   const started = Date.now()
   try {
     const probe = await runtime.runPromise(
-      Effect.flatMap(StreamManager, (streams) => streams.files(magnet, downloadPath)),
+      Effect.flatMap(StreamSession, (sessions) => sessions.files(magnet, downloadPath)),
     )
     console.log(
       `[smoke] OK after ${Date.now() - started}ms: ${probe.files.length} files, first=${probe.files[0]?.name}`,
