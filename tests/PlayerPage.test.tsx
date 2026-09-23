@@ -45,6 +45,9 @@ const { playerMock, videojsMock } = vi.hoisted(() => {
     const controlBar = document.createElement('div')
     controlBar.className = 'vjs-control-bar'
     element.append(controlBar)
+    const tech = document.createElement('div')
+    tech.className = 'vjs-tech'
+    element.append(tech)
     playerMock.el.mockReturnValue(element)
     playerMock.controlBar = {
       el: () => controlBar,
@@ -75,6 +78,7 @@ const { playerMock, videojsMock } = vi.hoisted(() => {
   return { playerMock, videojsMock }
 })
 
+// The component talks to the VideoEngine seam; the real engine wraps this fake video.js player.
 vi.mock('../src/renderer/src/player/videojs', () => ({ default: videojsMock }))
 
 beforeAll(async () => {
@@ -248,6 +252,16 @@ it('offers the next episode in the final minute and plays it on demand', async (
       ),
     ).toBe(true)
   })
+})
+
+it('fires the Shift+digit filter shortcuts', async () => {
+  stubBridge()
+  renderPlayer()
+  await waitFor(() => {
+    expect(document.querySelector('.player')).not.toBeNull()
+  })
+  fireEvent.keyDown(window, { key: '!', code: 'Digit1', shiftKey: true })
+  expect(document.querySelector<HTMLElement>('.vjs-tech')?.style.filter).toContain('contrast')
 })
 
 it('stops offering the next episode after "No thank you"', async () => {
