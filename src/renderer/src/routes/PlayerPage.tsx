@@ -225,8 +225,16 @@ export function PlayerPage() {
       </section>
     )
   }
-  if (chosenPlayer === 'extplayer' && localPath === '') {
-    return <ExternalPlayerPanel source={source} title={displayTitle} fileIndex={fileIndex} />
+  if (chosenPlayer !== 'local' && localPath === '') {
+    // `extplayer` (or a player that is no longer installed) falls through to the panel's list.
+    return (
+      <ExternalPlayerPanel
+        source={source}
+        title={displayTitle}
+        fileIndex={fileIndex}
+        playerId={chosenPlayer}
+      />
+    )
   }
   if (failure !== undefined) {
     return (

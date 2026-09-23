@@ -2,6 +2,7 @@
 import { join } from 'node:path'
 import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
 import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
+import { DeviceError } from '../shared/errors'
 import {
   DatabaseService,
   DatabaseServiceLive,
@@ -349,7 +350,15 @@ async function startServices() {
       play: (request: Parameters<ExternalPlayersPort['play']>[0]) =>
         Effect.gen(function* () {
           const player = externalPlayers.find((candidate) => candidate.id === request.playerId)
-          if (player === undefined) return
+          if (player === undefined) {
+            return yield* Effect.fail(
+              new DeviceError({
+                message: `no external player named ${request.playerId}`,
+                device: request.playerId,
+                operation: 'play',
+              }),
+            )
+          }
           const args = playerArgs(player, {
             url: request.url,
             ...(request.subtitle === undefined ? {} : { subtitle: request.subtitle }),
@@ -357,7 +366,13 @@ async function startServices() {
             fullscreen: request.fullscreen === true,
             utf8Subtitle: true,
           })
-          yield* launchPlayer(player, args)
+          const port = request.port
+          // Resolves once the player starts; when it exits, the stream it was given stops.
+          yield* launchPlayer(player, args, {
+            onExit: () => {
+              if (port !== undefined) runtime.runFork(streamManager.stopSession(port))
+            },
+          })
         }),
     },
   }

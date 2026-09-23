@@ -1,22 +1,33 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { basename, delimiter, join } from 'node:path'
 import { Effect } from 'effect'
+import { DeviceError } from '../shared/errors'
+
+/**
+ * A switch that takes a value: `joined` attaches it (`--sub-file=<path>`), otherwise the
+ * value is the next argument (`-sub <path>`). Stored structured so nothing is re-tokenised.
+ */
+export interface Flag {
+  readonly flag: string
+  readonly joined: boolean
+}
 
 /**
  * The legacy external-player table, ported verbatim: switches, the BSPlayer argument
  * order, MPlayer OSX Extended's charset switch and VLC's flatpak path all encode field
- * reports and are not re-derivable.
+ * reports and are not re-derivable. Switches are argv arrays, so a path is always one
+ * argument and never carries literal quotes.
  */
 export interface ExternalPlayerSpec {
   readonly type: string
   readonly cmd?: string
-  readonly switches?: string
-  readonly subswitch?: string
-  readonly fs?: string
-  readonly filenameswitch?: string
-  readonly urlswitch?: string
+  readonly switches?: ReadonlyArray<string>
+  readonly subswitch?: Flag
+  readonly fs?: ReadonlyArray<string>
+  readonly filenameswitch?: Flag
+  readonly urlswitch?: Flag
   readonly stop?: string
   readonly pause?: string
 }
@@ -25,80 +36,105 @@ export const EXTERNAL_PLAYERS: Readonly<Record<string, ExternalPlayerSpec>> = {
   VLC: {
     type: 'vlc',
     cmd: '/Contents/MacOS/VLC',
-    switches: '--no-video-title-show',
-    subswitch: '--sub-file=',
-    fs: '-f',
+    switches: ['--no-video-title-show'],
+    subswitch: { flag: '--sub-file=', joined: true },
+    fs: ['-f'],
     stop: 'vlc://quit',
     pause: 'vlc://pause',
-    filenameswitch: '--meta-title=',
+    filenameswitch: { flag: '--meta-title=', joined: true },
   },
   'Fleex player': {
     type: 'fleex-player',
     cmd: '/Contents/MacOS/Fleex player',
-    filenameswitch: '-file-name ',
+    filenameswitch: { flag: '-file-name', joined: false },
   },
   MPlayer: {
     type: 'mplayer',
     cmd: 'mplayer',
-    switches: '--really-quiet',
-    subswitch: '-sub ',
-    fs: '-fs',
+    switches: ['--really-quiet'],
+    subswitch: { flag: '-sub', joined: false },
+    fs: ['-fs'],
   },
   MPlayerX: {
     type: 'mplayer',
     cmd: '/Contents/MacOS/MPlayerX',
-    switches: '-font "/Library/Fonts/Arial Bold.ttf"',
-    urlswitch: '-url ',
-    subswitch: '-sub ',
-    fs: '-fs',
+    switches: ['-font', '/Library/Fonts/Arial Bold.ttf'],
+    urlswitch: { flag: '-url', joined: false },
+    subswitch: { flag: '-sub', joined: false },
+    fs: ['-fs'],
   },
   'MPlayer OSX Extended': {
     type: 'mplayer',
     cmd: '/Contents/Resources/Binaries/mpextended.mpBinaries/Contents/MacOS/mplayer',
-    switches: '-font "/Library/Fonts/Arial Bold.ttf"',
-    subswitch: '-sub ',
-    fs: '-fs',
+    switches: ['-font', '/Library/Fonts/Arial Bold.ttf'],
+    subswitch: { flag: '-sub', joined: false },
+    fs: ['-fs'],
   },
   IINA: {
     type: 'iina',
     cmd: '/Contents/MacOS/iina-cli',
-    subswitch: '--mpv-sub-file=',
-    fs: '--mpv-fs',
+    subswitch: { flag: '--mpv-sub-file=', joined: true },
+    fs: ['--mpv-fs'],
   },
   Bomi: {
     type: 'bomi',
-    switches: '',
-    subswitch: '--set-subtitle ',
-    fs: '--action window/enter-fs',
+    switches: [],
+    subswitch: { flag: '--set-subtitle', joined: false },
+    fs: ['--action', 'window/enter-fs'],
   },
   mpv: {
     type: 'mpv',
-    switches: '--no-terminal',
-    subswitch: '--sub-file=',
-    fs: '--fs',
-    filenameswitch: '--force-media-title=',
+    switches: ['--no-terminal'],
+    subswitch: { flag: '--sub-file=', joined: true },
+    fs: ['--fs'],
+    filenameswitch: { flag: '--force-media-title=', joined: true },
   },
   mpvnet: {
     type: 'mpvnet',
-    switches: '--no-terminal',
-    subswitch: '--sub-files=',
-    fs: '-fs',
-    filenameswitch: '--force-media-title=',
+    switches: ['--no-terminal'],
+    subswitch: { flag: '--sub-files=', joined: true },
+    fs: ['-fs'],
+    filenameswitch: { flag: '--force-media-title=', joined: true },
   },
-  'MPC-HC': { type: 'mpc-hc', switches: '', subswitch: '/sub ', fs: '/fullscreen' },
-  'MPC-HC64': { type: 'mpc-hc', switches: '', subswitch: '/sub ', fs: '/fullscreen' },
-  'MPC-BE': { type: 'mpc-be', switches: '', subswitch: '/sub ', fs: '/fullscreen' },
-  'MPC-BE64': { type: 'mpc-be', switches: '', subswitch: '/sub ', fs: '/fullscreen' },
+  'MPC-HC': {
+    type: 'mpc-hc',
+    switches: [],
+    subswitch: { flag: '/sub', joined: false },
+    fs: ['/fullscreen'],
+  },
+  'MPC-HC64': {
+    type: 'mpc-hc',
+    switches: [],
+    subswitch: { flag: '/sub', joined: false },
+    fs: ['/fullscreen'],
+  },
+  'MPC-BE': {
+    type: 'mpc-be',
+    switches: [],
+    subswitch: { flag: '/sub', joined: false },
+    fs: ['/fullscreen'],
+  },
+  'MPC-BE64': {
+    type: 'mpc-be',
+    switches: [],
+    subswitch: { flag: '/sub', joined: false },
+    fs: ['/fullscreen'],
+  },
   SMPlayer: {
     type: 'smplayer',
-    switches: '',
-    subswitch: '-sub ',
-    fs: '-fs',
+    switches: [],
+    subswitch: { flag: '-sub', joined: false },
+    fs: ['-fs'],
     stop: 'smplayer -send-action quit',
     pause: 'smplayer -send-action pause',
   },
-  BSPlayer: { type: 'bsplayer', switches: '', subswitch: '', fs: '-fs' },
-  PotPlayerMini64: { type: 'potplayer', switches: '', subswitch: '/sub=' },
+  // BSPlayer takes the subtitle path on its own, with no switch in front of it.
+  BSPlayer: { type: 'bsplayer', switches: [], subswitch: { flag: '', joined: true }, fs: ['-fs'] },
+  PotPlayerMini64: {
+    type: 'potplayer',
+    switches: [],
+    subswitch: { flag: '/sub=', joined: true },
+  },
 }
 
 /** A player found on disk. */
@@ -118,10 +154,10 @@ export interface PlaybackInput {
   readonly utf8Subtitle?: boolean
 }
 
-function switchesOf(value: string | undefined): ReadonlyArray<string> {
-  if (value === undefined || value.trim() === '') return []
-  // The table stores several switches per player, some with quoted values.
-  return value.match(/(?:[^\s"]+|"[^"]*")+/g) ?? []
+/** Renders a switch that takes a value: joined (`--sub-file=<path>`) or separate args. */
+function flagArgs(flag: Flag | undefined, value: string): ReadonlyArray<string> {
+  if (flag === undefined) return []
+  return flag.joined ? [`${flag.flag}${value}`] : [flag.flag, value]
 }
 
 /**
@@ -146,22 +182,20 @@ export function playerCommand(player: ExternalPlayer): {
 export function playerArgs(player: ExternalPlayer, input: PlaybackInput): ReadonlyArray<string> {
   const spec = EXTERNAL_PLAYERS[player.id]
   if (spec === undefined) return [input.url]
-  const switches = switchesOf(spec.switches)
+  const switches = spec.switches ?? []
   const subtitle =
     input.subtitle === undefined || input.subtitle === ''
       ? []
       : [
           ...(player.id === 'MPlayer OSX Extended' && input.utf8Subtitle === true ? ['-utf8'] : []),
-          ...switchesOf(spec.subswitch),
-          input.subtitle,
+          ...flagArgs(spec.subswitch, input.subtitle),
         ]
-  const fullscreen =
-    input.fullscreen === true && spec.fs !== undefined ? switchesOf(spec.fs) : ([] as const)
+  const fullscreen = input.fullscreen === true ? (spec.fs ?? []) : []
   const filename =
     spec.filenameswitch !== undefined && input.title !== undefined && input.title !== ''
-      ? [...switchesOf(spec.filenameswitch), input.title]
+      ? flagArgs(spec.filenameswitch, input.title)
       : []
-  const url = [...switchesOf(spec.urlswitch), input.url]
+  const url = spec.urlswitch === undefined ? [input.url] : flagArgs(spec.urlswitch, input.url)
 
   // BSPlayer needs its arguments in a specific order: url, then sub, then fs, then switches.
   return player.id === 'BSPlayer'
@@ -257,24 +291,48 @@ export function scanPlayers(
   })
 }
 
-/** Launches a player with an argv array; nothing is interpolated into a shell. */
+export interface LaunchOptions {
+  /** Called when the player process ends, so the caller can stop the stream it was given. */
+  readonly onExit?: (code: number | null) => void
+}
+
+/**
+ * Launches a player with an argv array; nothing is interpolated into a shell. The effect
+ * resolves as soon as the process starts (not when it exits), and a failed launch is a
+ * `DeviceError`. Exit is reported through `onExit` rather than blocking the caller.
+ */
 export function launchPlayer(
   player: ExternalPlayer,
   args: ReadonlyArray<string>,
-): Effect.Effect<void> {
+  options: LaunchOptions = {},
+): Effect.Effect<void, DeviceError> {
   const { file, prefix } = playerCommand(player)
-  return Effect.tryPromise(
-    () =>
-      new Promise<void>((resolve, reject) => {
-        execFile(file, [...prefix, ...args], (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
-      }),
-  ).pipe(
-    Effect.asVoid,
-    Effect.orElseSucceed(() => undefined),
-  )
+  return Effect.async<void, DeviceError>((resume) => {
+    const fail = (cause: unknown) =>
+      new DeviceError({
+        message: `cannot launch ${player.id}`,
+        device: player.id,
+        operation: 'launch',
+        cause,
+      })
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(file, [...prefix, ...args], { stdio: 'ignore' })
+    } catch (cause) {
+      resume(Effect.fail(fail(cause)))
+      return
+    }
+    const onSpawn = () => resume(Effect.void)
+    const onError = (cause: Error) => resume(Effect.fail(fail(cause)))
+    child.once('spawn', onSpawn)
+    child.once('error', onError)
+    child.once('exit', (code) => options.onExit?.(code))
+    return Effect.sync(() => {
+      child.off('spawn', onSpawn)
+      child.off('error', onError)
+      // The exit listener stays attached: the process outlives this effect on purpose.
+    })
+  })
 }
 
 /** The names the legacy app listed in its player chooser. */
