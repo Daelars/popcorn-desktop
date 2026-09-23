@@ -51,7 +51,7 @@ function statusOf(torrent: WebTorrentTorrent): TorrentStatus {
   }
 }
 
-function handleOf(torrent: WebTorrentTorrent): TorrentHandle {
+export function handleOf(torrent: WebTorrentTorrent): TorrentHandle {
   const fileAt = (index: number) => {
     const file = torrent.files[index]
     if (file === undefined) {
@@ -72,8 +72,12 @@ function handleOf(torrent: WebTorrentTorrent): TorrentHandle {
     select: (index) =>
       Effect.try({
         try: () => {
-          torrent.select(index, 1)
           const file = fileAt(index)
+          // WebTorrent selects every file when a torrent is added; drop all of it, then
+          // select just the file to play, so a season pack does not download whole.
+          torrent.deselect(0, torrent.pieces.length - 1)
+          for (const candidate of torrent.files) candidate.deselect()
+          file.select(1)
           return { name: file.name, length: file.length }
         },
         catch: (cause) =>

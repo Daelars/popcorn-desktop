@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { Readable } from 'node:stream'
 import { Effect, Exit, Fiber, Layer, ManagedRuntime, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
+import type { WebTorrentTorrent } from 'webtorrent'
 import {
   parseRange,
   TorrentEngine,
@@ -11,6 +12,7 @@ import {
   TorrentService,
   TorrentServiceLive,
 } from '../src/main/torrent'
+import { handleOf } from '../src/main/webtorrent-engine'
 import { TorrentError } from '../src/shared/errors'
 
 const FILE_BYTES = Buffer.from('0123456789')
@@ -308,5 +310,68 @@ describe('TorrentService', () => {
       expect(exit.cause.toString()).toContain('TorrentError')
     }
     await runtime.dispose()
+  })
+})
+
+describe('webtorrent file selection', () => {
+  function fakeTorrent() {
+    const selected = new Set<number>()
+    const files = [0, 1, 2].map((piece) => {
+      const name = `episode-${piece + 1}.mkv`
+      return {
+        name,
+        length: 10,
+        path: name,
+        createReadStream: () => Readable.from(Buffer.from('0123456789')),
+        select: () => {
+          selected.add(piece)
+        },
+        deselect: () => {
+          selected.delete(piece)
+        },
+      }
+    })
+    const torrent: Record<string, unknown> = {
+      infoHash: 'aabbccddeeff',
+      name: 'Season 1',
+      length: 30,
+      files,
+      pieces: [null, null, null],
+      downloaded: 0,
+      uploaded: 0,
+      downloadSpeed: 0,
+      uploadSpeed: 0,
+      numPeers: 0,
+      progress: 0,
+      paused: false,
+      ready: true,
+      once: () => torrent,
+      on: () => torrent,
+      off: () => torrent,
+      select: (start: number, end: number) => {
+        for (let piece = start; piece <= end; piece += 1) selected.add(piece)
+      },
+      deselect: (start: number, end: number) => {
+        for (let piece = start; piece <= end; piece += 1) selected.delete(piece)
+      },
+      pause: () => {},
+      resume: () => {},
+      destroy: () => {},
+    }
+    return { torrent: torrent as unknown as WebTorrentTorrent, selected }
+  }
+
+  it('deselects every file and selects only the chosen one', () => {
+    const { torrent, selected } = fakeTorrent()
+    // WebTorrent selects every file by default when the torrent is added.
+    selected.add(0)
+    selected.add(1)
+    selected.add(2)
+
+    const handle = handleOf(torrent)
+    const file = Effect.runSync(handle.select(1))
+
+    expect(file.name).toBe('episode-2.mkv')
+    expect([...selected]).toEqual([1])
   })
 })
