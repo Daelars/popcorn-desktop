@@ -1,8 +1,23 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useRef, useState } from 'react'
+import { Fragment, type ReactNode, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { SettingsKey } from '../../../shared/settings'
+import {
+  type CheckboxRow,
+  LIMIT_MULTIPLIERS,
+  MOVIE_TRANSPARENCY,
+  type NumberRow,
+  type OptionSource,
+  SERIES_TRANSPARENCY,
+  SETTINGS_LAYOUT,
+  type SelectRow,
+  type SettingOption,
+  type SettingRow,
+  TAB_CHECKBOXES,
+  type TextRow,
+} from '../../../shared/settings-layout'
+import { SETTINGS_METADATA } from '../../../shared/settings-metadata'
 import { popcorn } from '../bridge'
 import { changeLanguage, languages } from '../i18n'
 import { notify } from '../notify'
@@ -11,130 +26,18 @@ import { themes } from '../theme'
 
 type Update = (key: SettingsKey, value: unknown) => void
 
-interface Choice {
-  readonly value: string
-  readonly label: string
-}
-
-const START_SCREENS = ['Movies', 'TV Series', 'Anime', 'Favorites', 'Watched', 'Last Open'] as const
-
-const POSTER_SIZES: readonly Choice[] = [
-  { value: '134', label: '100%' },
-  { value: '154', label: '113%' },
-  { value: '174', label: '125%' },
-  { value: '194', label: '138%' },
-  { value: '214', label: '150%' },
-  { value: '234', label: '163%' },
-  { value: '254', label: '175%' },
-  { value: '274', label: '188%' },
-  { value: '294', label: '200%' },
-]
-
-const MOVIE_TRANSPARENCY: readonly Choice[] = [
-  { value: '1', label: 'Disabled' },
-  { value: '0.90', label: 'Very Low' },
-  { value: '0.75', label: 'Low' },
-  { value: '0.65', label: 'Medium' },
-  { value: '0.55', label: 'High' },
-  { value: '0.40', label: 'Very High' },
-]
-
-const SERIES_TRANSPARENCY: readonly Choice[] = [
-  { value: '', label: 'Disabled' },
-  { value: 'vlow', label: 'Very Low' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'vhigh', label: 'Very High' },
-]
-
-const DEFAULT_FILTERS: readonly Choice[] = [
-  { value: 'default', label: 'Default' },
-  { value: 'custom', label: 'Custom' },
-  { value: 'remember', label: 'Remember' },
-]
-
-const WATCHED_COVERS: readonly Choice[] = [
-  { value: 'none', label: 'Show' },
-  { value: 'fade', label: 'Fade' },
-  { value: 'hide', label: 'Hide' },
-]
-
-const TV_DETAIL_JUMP: readonly Choice[] = [
-  { value: 'next', label: 'Next episode' },
-  { value: 'firstUnwatched', label: 'First unwatched episode' },
-]
-
-const TITLE_TRANSLATION: readonly Choice[] = [
-  { value: 'origin', label: 'Original only' },
-  { value: 'origin-translated', label: 'Original - Translated' },
-  { value: 'translated-origin', label: 'Translated - Original' },
-  { value: 'translated', label: 'Translated only' },
-]
-
-const SUBTITLE_DECORATION: readonly Choice[] = [
-  { value: 'None', label: 'None' },
-  { value: 'Outline', label: 'Outline' },
-  { value: 'Opaque Background', label: 'Opaque Background' },
-  { value: 'See-through Background', label: 'See-through Background' },
-]
-
-const SUBTITLE_FONTS: readonly Choice[] = [
-  'Arial',
-  'Open Sans',
-  'Roboto',
-  'Tahoma',
-  'Verdana',
-  'Georgia',
-  'Trebuchet MS',
-  'Comic Sans MS',
-  'Helvetica',
-  'Lato',
-  'Montserrat',
-  'Ubuntu',
-  'PT Sans',
-  'OpenDyslexic',
-  'Deja Vu Sans',
-  'Droid Sans',
-  'Geneva',
-  'AljazeeraMedExtOf',
-  'Khalid Art',
-].map((font) => ({ value: font, label: font }))
-
-const SUBTITLE_SIZES: readonly Choice[] = Array.from({ length: 21 }, (_unused, index) => {
-  const size = `${20 + index * 2}px`
-  return { value: size, label: size }
-})
-
-const DEL_SEEDBOX_CACHE: readonly Choice[] = [
-  { value: 'always', label: 'Always' },
-  { value: 'never', label: 'Never' },
-  { value: 'ask', label: 'Ask me every time' },
-]
-
-const LIMIT_MULTIPLIERS: readonly Choice[] = [
-  { value: '1024', label: 'KB/s' },
-  { value: '1048576', label: 'MB/s' },
-]
-
-const DEFAULT_QUALITIES: readonly Choice[] = [
-  { value: '1080p', label: '1080p' },
-  { value: '720p', label: '720p' },
-  { value: '480p', label: '480p' },
-]
-
-const CHOSEN_PLAYERS: readonly Choice[] = [
-  { value: 'local', label: 'Local player' },
-  { value: 'extplayer', label: 'External player' },
-]
-
-const LANGUAGE_OPTIONS: readonly Choice[] = languages.map((code) => ({
+const LANGUAGE_OPTIONS: ReadonlyArray<SettingOption> = languages.map((code) => ({
   value: code,
   label: nativeLanguageName(code),
 }))
 
-const CONTENT_LANGUAGE_OPTIONS: readonly Choice[] = [
+const CONTENT_LANGUAGE_OPTIONS: ReadonlyArray<SettingOption> = [
   { value: '', label: 'Same as Default Language' },
+  ...LANGUAGE_OPTIONS,
+]
+
+const SUBTITLE_LANGUAGE_OPTIONS: ReadonlyArray<SettingOption> = [
+  { value: 'none', label: 'Disabled' },
   ...LANGUAGE_OPTIONS,
 ]
 
@@ -177,6 +80,11 @@ function useUpdate(): { update: Update; saved: boolean } {
   }
 }
 
+/** The label comes from the metadata; a row may override it for a legacy wording. */
+function labelFor(key: SettingsKey, override: string | undefined): string {
+  return override ?? SETTINGS_METADATA[key].label
+}
+
 function Checkbox({
   settingKey,
   label,
@@ -187,8 +95,8 @@ function Checkbox({
   settingKey: SettingsKey
   label: string
   update: Update
-  id?: string
-  labelId?: string
+  id?: string | undefined
+  labelId?: string | undefined
 }) {
   const { t } = useTranslation()
   const settings = useSettings().data
@@ -219,7 +127,7 @@ function Select({
   label,
 }: {
   settingKey: SettingsKey
-  options: readonly Choice[]
+  options: readonly SettingOption[]
   update: Update
   numeric?: boolean
   label?: string
@@ -259,7 +167,7 @@ function Dropdown({
 }: {
   settingKey: SettingsKey
   label: string
-  options: readonly Choice[]
+  options: readonly SettingOption[]
   update: Update
   className?: string
   numeric?: boolean
@@ -383,34 +291,307 @@ function Section({ id, title, children }: { id: string; title: string; children:
   )
 }
 
-/** Port of the legacy settings container: left category column, one row per control. */
+/** A generic `<span>` row: control(s), an optional hint, and the legacy restart note. */
+function Row({
+  hint,
+  restart,
+  children,
+}: {
+  hint?: string | undefined
+  restart?: boolean | undefined
+  children: ReactNode
+}) {
+  const { t } = useTranslation()
+  return (
+    <span>
+      {children}
+      {hint === undefined ? null : (
+        <em>
+          <i className="fas fa-exclamation-circle">&nbsp;&nbsp;</i>
+          {t(hint)}
+        </em>
+      )}
+      {restart === true ? <em>&nbsp;&nbsp;&nbsp;{t('Please restart your application')}</em> : null}
+    </span>
+  )
+}
+
 export function SettingsPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { update, saved } = useUpdate()
   const settings = useSettings().data
 
-  const seedbox = settings?.activateSeedbox === true
-  const startScreens = START_SCREENS.filter((screen) => {
-    switch (screen) {
-      case 'Movies':
-        return settings?.moviesTabEnable === true
-      case 'TV Series':
-        return settings?.seriesTabEnable === true
-      case 'Anime':
-        return settings?.animeTabEnable === true
-      case 'Favorites':
-        return settings?.favoritesTabEnable === true
-      case 'Watched':
-        return settings?.watchedTabEnable === true
-      default:
-        return true
-    }
-  }).map((screen) => ({ value: screen, label: screen }))
+  const START_SCREEN_NAMES: Record<string, string> = {
+    moviesTabEnable: 'Movies',
+    seriesTabEnable: 'TV Series',
+    animeTabEnable: 'Anime',
+    favoritesTabEnable: 'Favorites',
+    watchedTabEnable: 'Watched',
+  }
+  const startScreens: ReadonlyArray<SettingOption> = [
+    ...TAB_CHECKBOXES.filter((tab) => {
+      switch (tab.key) {
+        case 'moviesTabEnable':
+          return settings?.moviesTabEnable === true
+        case 'seriesTabEnable':
+          return settings?.seriesTabEnable === true
+        case 'animeTabEnable':
+          return settings?.animeTabEnable === true
+        case 'favoritesTabEnable':
+          return settings?.favoritesTabEnable === true
+        case 'watchedTabEnable':
+          return settings?.watchedTabEnable === true
+        default:
+          return true
+      }
+    }).map((tab) => {
+      const name = START_SCREEN_NAMES[tab.key] ?? tab.key
+      return { value: name, label: name }
+    }),
+    { value: 'Last Open', label: 'Last Open' },
+  ]
 
   const downloaded = settings?.totalDownloaded ?? 0
   const uploaded = settings?.totalUploaded ?? 0
   const ratio = downloaded > 0 ? (uploaded / downloaded).toFixed(2) : t('None')
+
+  const resolveOptions = (source: SelectRow['options']): ReadonlyArray<SettingOption> => {
+    if (Array.isArray(source)) return source
+    switch (source as OptionSource) {
+      case 'themes':
+        return themes.map((theme) => ({
+          value: theme,
+          label: theme.replace(/_theme$/, '').replace(/_/g, ' '),
+        }))
+      case 'startScreens':
+        return startScreens
+      case 'languages':
+        return LANGUAGE_OPTIONS
+      case 'contentLanguages':
+        return CONTENT_LANGUAGE_OPTIONS
+      default:
+        return SUBTITLE_LANGUAGE_OPTIONS
+    }
+  }
+
+  const renderCheckbox = (row: CheckboxRow) => (
+    <Row hint={row.hint} restart={SETTINGS_METADATA[row.key].apply === 'restart'}>
+      <Checkbox
+        settingKey={row.key}
+        label={labelFor(row.key, row.label)}
+        labelId={row.labelId}
+        update={
+          row.notifyRestart === true
+            ? (key, value) => {
+                update(key, value)
+                notify(t('Restart required'))
+              }
+            : update
+        }
+      />
+    </Row>
+  )
+
+  const renderSelect = (row: SelectRow) => {
+    const label = labelFor(row.key, row.label)
+    return (
+      <Row restart={SETTINGS_METADATA[row.key].apply === 'restart'}>
+        <Dropdown
+          settingKey={row.key}
+          label={label}
+          options={resolveOptions(row.options)}
+          update={
+            row.onChange === 'language'
+              ? (key, value) => {
+                  update(key, value)
+                  if (typeof value === 'string' && value !== '') void changeLanguage(value)
+                }
+              : update
+          }
+          {...(row.className === undefined ? {} : { className: row.className })}
+          {...(row.numeric === true ? { numeric: true } : {})}
+        />
+      </Row>
+    )
+  }
+
+  const renderText = (row: TextRow) => (
+    <Row restart={SETTINGS_METADATA[row.key].apply === 'restart'}>
+      <TextField
+        settingKey={row.key}
+        label={labelFor(row.key, row.label)}
+        update={update}
+        {...(row.size === undefined ? {} : { size: row.size })}
+        {...(row.readOnly === true ? { readOnly: true } : {})}
+        {...(row.placeholder === undefined ? {} : { placeholder: row.placeholder })}
+      />
+      {row.folder === undefined ? null : (
+        <OpenFolder
+          target={row.folder}
+          label={t(
+            row.folder === 'cache'
+              ? 'Open Cache Directory'
+              : row.folder === 'downloads'
+                ? 'Open Downloads Directory'
+                : 'Open Database Directory',
+          )}
+        />
+      )}
+    </Row>
+  )
+
+  const renderNumber = (row: NumberRow) => (
+    <Row restart={SETTINGS_METADATA[row.key].apply === 'restart'}>
+      <NumberField
+        settingKey={row.key}
+        label={labelFor(row.key, row.label)}
+        update={update}
+        {...(row.min === undefined ? {} : { min: row.min })}
+        {...(row.max === undefined ? {} : { max: row.max })}
+      />
+      {row.hint === 'percent' ? (
+        <em>&nbsp;%&nbsp;&nbsp;&nbsp;25% - 400%</em>
+      ) : row.hint === undefined ? null : (
+        <em>&nbsp;&nbsp;&nbsp;{t(row.hint)}</em>
+      )}
+    </Row>
+  )
+
+  const renderRow = (row: SettingRow) => {
+    switch (row.kind) {
+      case 'checkbox':
+        return renderCheckbox(row)
+      case 'select':
+        return renderSelect(row)
+      case 'text':
+        return renderText(row)
+      case 'number':
+        return renderNumber(row)
+      case 'colour':
+        return (
+          <Row>
+            <div className="subtitles-custom">
+              <p>{t('Color')}</p>
+              <input
+                className="coloursub"
+                id="subtitles_color"
+                type="color"
+                name="subtitle_color"
+                list="subs_colors"
+                value={settings?.subtitle_color ?? '#ffffff'}
+                onChange={(event) => update('subtitle_color', event.target.value)}
+              />
+              <datalist id="subs_colors">
+                <option>#ffffff</option>
+                <option>#ffff00</option>
+                <option>#ff0000</option>
+                <option>#ff00ff</option>
+                <option>#00ffff</option>
+                <option>#00ff00</option>
+              </datalist>
+            </div>
+          </Row>
+        )
+      case 'tabs':
+        return (
+          <span className="settings-tabs">
+            <p>{t('Tabs')}</p>
+            {TAB_CHECKBOXES.map((tab) => (
+              <Checkbox
+                key={tab.key}
+                settingKey={tab.key}
+                label={tab.label ?? tab.key}
+                update={update}
+              />
+            ))}
+          </span>
+        )
+      case 'transparency':
+        return (
+          <Row>
+            <div className="dropdown UITransparency">
+              <p>{t('UI Transparency')}</p>
+              <label htmlFor="moviesUITransparency">{t('Movies')}</label>
+              <Select
+                settingKey="moviesUITransparency"
+                options={MOVIE_TRANSPARENCY}
+                update={update}
+              />
+              <label htmlFor="seriesUITransparency">{t('Series')}</label>
+              <Select
+                settingKey="seriesUITransparency"
+                options={SERIES_TRANSPARENCY}
+                update={update}
+              />
+            </div>
+          </Row>
+        )
+      case 'speed':
+        return (
+          <Row>
+            <p>{t('Max. Down / Up Speed')}</p>
+            <TextField settingKey="downloadLimit" placeholder="Unlimited" update={update} />
+            <TextField settingKey="uploadLimit" placeholder="Unlimited" update={update} />
+            <Select settingKey="maxLimitMult" options={LIMIT_MULTIPLIERS} numeric update={update} />
+          </Row>
+        )
+      case 'ratio':
+        return (
+          <span id="overallRatio">
+            <p>{t('Overall Ratio')}</p>
+            <input type="text" name="overallRatio" size={20} readOnly value={ratio} />
+            <em>
+              {formatSize(downloaded)}
+              <i className="fa fa-arrow-circle-down" />
+              {formatSize(uploaded)}
+              <i className="fa fa-arrow-circle-up" />
+            </em>
+          </span>
+        )
+      case 'preload':
+        return (
+          <Row>
+            <Checkbox
+              settingKey="playNextEpisodeAuto"
+              label="Play next episode automatically"
+              update={update}
+            />
+            {settings?.playNextEpisodeAuto === true ? (
+              <>
+                <NumberField
+                  settingKey="preloadNextEpisodeTime"
+                  min={0}
+                  max={99999}
+                  update={update}
+                />
+                <em>
+                  {t('minute(s) remaining before preloading next episode')},&nbsp;&nbsp;&nbsp;
+                  {t('0 = Disable preloading')}
+                </em>
+              </>
+            ) : null}
+          </Row>
+        )
+      case 'contentLanguage':
+        return (
+          <Row>
+            <Dropdown
+              settingKey="contentLanguage"
+              label={t('Default Content Language')}
+              className="subtitles-language"
+              options={CONTENT_LANGUAGE_OPTIONS}
+              update={update}
+            />
+            <Checkbox
+              settingKey="contentLangOnly"
+              label="Only show content available in this language"
+              update={update}
+            />
+          </Row>
+        )
+    }
+  }
 
   return (
     <div className="settings-container-contain">
@@ -459,555 +640,25 @@ export function SettingsPage() {
           </span>
         </Section>
 
-        <Section id="user-interface" title={t('User Interface')}>
-          <span>
-            <Dropdown
-              settingKey="theme"
-              label="Theme"
-              className="pct-theme"
-              options={themes.map((theme) => ({
-                value: theme,
-                label: theme.replace(/_theme$/, '').replace(/_/g, ' '),
-              }))}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="startScreen"
-              label="Start Screen"
-              className="start-screen"
-              options={startScreens}
-              update={update}
-            />
-          </span>
-          <span className="settings-tabs">
-            <p>{t('Tabs')}</p>
-            <Checkbox settingKey="moviesTabEnable" label="Movies" update={update} />
-            <Checkbox settingKey="seriesTabEnable" label="Series" update={update} />
-            <Checkbox settingKey="animeTabEnable" label="Anime" update={update} />
-            <Checkbox settingKey="favoritesTabEnable" label="Favorites" update={update} />
-            <Checkbox settingKey="watchedTabEnable" label="Watched" update={update} />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="coversShowRating"
-              label="Show rating over covers"
-              update={update}
-            />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="alwaysShowBookmarks"
-              label="Always show bookmark over covers"
-              update={update}
-            />
-          </span>
-          {seedbox ? (
-            <span>
-              <Checkbox
-                settingKey="showSeedboxOnDlInit"
-                label="Show the Seedbox when a new download is added"
-                update={update}
-              />
-            </span>
-          ) : null}
-          <span>
-            <Checkbox
-              settingKey="expandedSearch"
-              label="Search field always expanded"
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="defaultFilters"
-              label="Default Filters"
-              className="defaultFilters"
-              options={DEFAULT_FILTERS}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="watchedCovers"
-              label="Watched Items"
-              className="watchedCovers"
-              options={WATCHED_COVERS}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="tv_detail_jump_to"
-              label="Series detail opens to"
-              className="tv_detail_jump_to"
-              options={TV_DETAIL_JUMP}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="postersWidth"
-              label="Poster Size"
-              className="poster_size"
-              options={POSTER_SIZES}
-              numeric
-              update={update}
-            />
-          </span>
-          <span>
-            <NumberField
-              settingKey="bigPicture"
-              label="UI Scaling"
-              min={25}
-              max={400}
-              update={update}
-            />
-            <em>&nbsp;%&nbsp;&nbsp;&nbsp;25% - 400%</em>
-          </span>
-          <span>
-            <div className="dropdown UITransparency">
-              <p>{t('UI Transparency')}</p>
-              <label htmlFor="moviesUITransparency">{t('Movies')}</label>
-              <Select
-                settingKey="moviesUITransparency"
-                options={MOVIE_TRANSPARENCY}
-                update={update}
-              />
-              <label htmlFor="seriesUITransparency">{t('Series')}</label>
-              <Select
-                settingKey="seriesUITransparency"
-                options={SERIES_TRANSPARENCY}
-                update={update}
-              />
-            </div>
-          </span>
-          <span>
-            {/* The frame is set when the window is created; the legacy app required a restart. */}
-            <Checkbox
-              settingKey="nativeWindowFrame"
-              label="Native window frame"
-              update={(key, value) => {
-                update(key, value)
-                notify(t('Restart required'))
-              }}
-            />
-          </span>
-          <span>
-            <Checkbox settingKey="alwaysOnTop" label="Always On Top" update={update} />
-          </span>
-          <span>
-            <Checkbox settingKey="minimizeToTray" label="Minimize to Tray" update={update} />
-          </span>
-          <span>
-            <Checkbox settingKey="events" label="Celebrate various events" update={update} />
-          </span>
-        </Section>
-
-        <Section id="localisation" title={t('Language')}>
-          <span>
-            <Dropdown
-              settingKey="language"
-              label="Default Language"
-              className="subtitles-language"
-              options={LANGUAGE_OPTIONS}
-              update={(key, value) => {
-                update(key, value)
-                if (typeof value === 'string' && value !== '') void changeLanguage(value)
-              }}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="contentLanguage"
-              label="Default Content Language"
-              className="subtitles-language"
-              options={CONTENT_LANGUAGE_OPTIONS}
-              update={update}
-            />
-            <Checkbox
-              settingKey="contentLangOnly"
-              label="Only show content available in this language"
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="translateTitle"
-              label="Title translation"
-              className="translateTitle"
-              options={TITLE_TRANSLATION}
-              update={update}
-            />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="translateEpisodes"
-              label="Translate Episode Titles"
-              update={update}
-            />
-          </span>
-          <span>
-            <Checkbox settingKey="translateSynopsis" label="Translate Synopsis" update={update} />
-          </span>
-          <span>
-            <Checkbox settingKey="translatePosters" label="Translate Posters" update={update} />
-          </span>
-          <span id="translation_info">
-            <em>
-              *{' '}
-              {t(
-                'Translations depend on availability. Some options also might not be supported by all API servers',
+        {SETTINGS_LAYOUT.map((section) => {
+          const visible = section.rows.filter(
+            (row) =>
+              !('visibleWhen' in row) || row.visibleWhen === undefined || row.visibleWhen(settings),
+          )
+          return (
+            <Section key={section.id} id={section.id} title={t(section.title)}>
+              {visible.map((row, index) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: the layout is static
+                <Fragment key={index}>{renderRow(row)}</Fragment>
+              ))}
+              {section.hint === undefined ? null : (
+                <span id={section.hintId}>
+                  <em>* {t(section.hint)}</em>
+                </span>
               )}
-            </em>
-          </span>
-        </Section>
-
-        <Section id="subtitles" title={t('Subtitles')}>
-          <span>
-            <Dropdown
-              settingKey="subtitle_language"
-              label="Default Subtitle"
-              className="subtitles-language-default"
-              options={[{ value: 'none', label: 'Disabled' }, ...LANGUAGE_OPTIONS]}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="subtitle_font"
-              label="Font"
-              className="subtitles-font"
-              options={SUBTITLE_FONTS}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="subtitle_decoration"
-              label="Decoration"
-              className="subtitles-decoration"
-              options={SUBTITLE_DECORATION}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="subtitle_size"
-              label="Size"
-              className="subtitles-size"
-              options={SUBTITLE_SIZES}
-              update={update}
-            />
-          </span>
-          <span>
-            <div className="subtitles-custom">
-              <p>{t('Color')}</p>
-              <input
-                className="colorsub"
-                id="subtitles_color"
-                type="color"
-                name="subtitle_color"
-                list="subs_colors"
-                value={settings?.subtitle_color ?? '#ffffff'}
-                onChange={(event) => update('subtitle_color', event.target.value)}
-              />
-              <datalist id="subs_colors">
-                <option>#ffffff</option>
-                <option>#ffff00</option>
-                <option>#ff0000</option>
-                <option>#ff00ff</option>
-                <option>#00ffff</option>
-                <option>#00ff00</option>
-              </datalist>
-            </div>
-          </span>
-          <span>
-            <Checkbox settingKey="subtitles_bold" label="Bold" update={update} id="subsbold" />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="multipleExtSubtitles"
-              label="Show all available subtitles for default language in flag menu"
-              update={update}
-            />
-          </span>
-        </Section>
-
-        <Section id="playback" title={t('Playback')}>
-          <span>
-            <Checkbox
-              settingKey="alwaysFullscreen"
-              label="Always start playing in fullscreen"
-              update={update}
-            />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="playNextEpisodeAuto"
-              label="Play next episode automatically"
-              update={update}
-            />
-            {settings?.playNextEpisodeAuto === true ? (
-              <>
-                <NumberField
-                  settingKey="preloadNextEpisodeTime"
-                  min={0}
-                  max={99999}
-                  update={update}
-                />
-                <em>
-                  {t('minute(s) remaining before preloading next episode')},&nbsp;&nbsp;&nbsp;
-                  {t('0 = Disable preloading')}
-                </em>
-              </>
-            ) : null}
-          </span>
-          <span>
-            <Checkbox
-              settingKey="audioPassthrough"
-              label="Allow Audio Passthrough"
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="movies_default_quality"
-              label="Movies default quality"
-              options={DEFAULT_QUALITIES}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="shows_default_quality"
-              label="Series default quality"
-              options={DEFAULT_QUALITIES}
-              update={update}
-            />
-          </span>
-          <span>
-            <Dropdown
-              settingKey="chosenPlayer"
-              label="Player"
-              options={CHOSEN_PLAYERS}
-              update={update}
-            />
-          </span>
-        </Section>
-
-        <Section id="features" title={t('Features')}>
-          <span>
-            <Checkbox settingKey="activateWatchlist" label="Watchlist" update={update} />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="activateTorrentCollection"
-              label="Torrent Collection"
-              update={update}
-            />
-          </span>
-          <span>
-            <Checkbox settingKey="activateSeedbox" label="Seedbox" update={update} />
-          </span>
-          <span>
-            <Checkbox settingKey="activateTempf" label="Cache Folder Button" update={update} />
-          </span>
-        </Section>
-
-        <Section id="remote-control" title={t('Remote Control')}>
-          <span>
-            <Checkbox settingKey="httpApiEnabled" label="Enable remote control" update={update} />
-          </span>
-          {settings?.httpApiEnabled === true ? (
-            <>
-              <span>
-                <NumberField settingKey="httpApiPort" label="HTTP API Port" update={update} />
-              </span>
-              <span>
-                <TextField settingKey="httpApiUsername" label="HTTP API Username" update={update} />
-              </span>
-              <span>
-                <TextField settingKey="httpApiPassword" label="HTTP API Password" update={update} />
-              </span>
-            </>
-          ) : null}
-        </Section>
-
-        <Section id="apiserver" title={t('API Server(s)')}>
-          <span>
-            <TextField
-              settingKey="customMoviesServer"
-              label="Movies API Server(s)"
-              size={61}
-              update={update}
-            />
-          </span>
-          <span>
-            <TextField
-              settingKey="customSeriesServer"
-              label="Series API Server(s)"
-              size={61}
-              update={update}
-            />
-          </span>
-          <span>
-            <TextField
-              settingKey="customAnimeServer"
-              label="Anime API Server(s)"
-              size={61}
-              update={update}
-            />
-          </span>
-          <span id="apiserver_info">
-            <em>
-              *{' '}
-              {t(
-                'You can add multiple API Servers separated with a , from which it will select randomly (*for load balancing) until it finds the first available',
-              )}
-            </em>
-          </span>
-        </Section>
-
-        <Section id="connection" title={t('Connection')}>
-          {seedbox ? (
-            <span>
-              <NumberField
-                settingKey="maxActiveTorrents"
-                label="Active Torrents Limit"
-                update={update}
-              />
-            </span>
-          ) : null}
-          <span>
-            <NumberField settingKey="connectionLimit" label="Connection Limit" update={update} />
-          </span>
-          <span>
-            <NumberField
-              settingKey="maxUdpReqLimit"
-              label="DHT UDP Requests Limit"
-              update={update}
-            />
-          </span>
-          <span>
-            <p>{t('Max. Down / Up Speed')}</p>
-            <TextField settingKey="downloadLimit" placeholder="Unlimited" update={update} />
-            <TextField settingKey="uploadLimit" placeholder="Unlimited" update={update} />
-            <Select settingKey="maxLimitMult" options={LIMIT_MULTIPLIERS} numeric update={update} />
-          </span>
-          <span id="overallRatio">
-            <p>{t('Overall Ratio')}</p>
-            <input type="text" name="overallRatio" size={20} readOnly value={ratio} />
-            <em>
-              {formatSize(downloaded)}
-              <i className="fa fa-arrow-circle-down" />
-              {formatSize(uploaded)}
-              <i className="fa fa-arrow-circle-up" />
-            </em>
-          </span>
-          <span>
-            <NumberField settingKey="streamPort" label="Port to stream on" update={update} />
-            <em>&nbsp;&nbsp;&nbsp;{t('0 = Random')}</em>
-          </span>
-          {seedbox &&
-          (settings?.deleteTmpOnClose !== true || settings?.separateDownloadsDir === true) ? (
-            <span>
-              <Checkbox
-                settingKey="continueSeedingOnStart"
-                label="Resume seeding after restarting the app?"
-                update={update}
-              />
-            </span>
-          ) : null}
-          <span>
-            <Checkbox
-              settingKey="protocolEncryption"
-              label="Enable Protocol Encryption"
-              labelId="protocolEnc"
-              update={update}
-            />
-            <em>
-              <i className="fas fa-exclamation-circle">&nbsp;&nbsp;</i>
-              {t(
-                'Allows connecting to peers that use PE/MSE. Will in most cases increase the number of connectable peers but might also result in increased CPU usage',
-              )}
-            </em>
-          </span>
-          <span>
-            <TextField
-              settingKey="proxyServer"
-              label="Proxy Server"
-              size={50}
-              placeholder="host:port (127.0.0.1:9050 or 127.0.0.1:4447)"
-              update={update}
-            />
-          </span>
-        </Section>
-
-        <Section id="cache" title={t('Cache')}>
-          <span>
-            <TextField settingKey="tmpLocation" label="Cache Directory" size={61} readOnly />
-            <OpenFolder target="cache" label={t('Open Cache Directory')} />
-          </span>
-          <span>
-            <Checkbox
-              settingKey="deleteTmpOnClose"
-              label="Clear Cache Folder after closing the app?"
-              update={update}
-            />
-          </span>
-          {seedbox ? (
-            <span>
-              <Dropdown
-                settingKey="delSeedboxCache"
-                label="Delete related cache when removing from Seedbox"
-                className="del-seedbox-cache"
-                options={DEL_SEEDBOX_CACHE}
-                update={update}
-              />
-            </span>
-          ) : null}
-          {seedbox ? (
-            <span>
-              <Checkbox
-                settingKey="separateDownloadsDir"
-                label="Separate directory for Downloads"
-                labelId="downloadsDir"
-                update={update}
-              />
-              <em>
-                <i className="fas fa-exclamation-circle">&nbsp;&nbsp;</i>
-                {t(
-                  'Enabling will prevent the sharing of cache between the Watch Now and Download functions',
-                )}
-              </em>
-            </span>
-          ) : null}
-          {seedbox && settings?.separateDownloadsDir === true ? (
-            <span>
-              <TextField
-                settingKey="downloadsLocation"
-                label="Downloads Directory"
-                size={61}
-                readOnly
-              />
-              <OpenFolder target="downloads" label={t('Open Downloads Directory')} />
-            </span>
-          ) : null}
-        </Section>
-
-        <Section id="database" title={t('Database')}>
-          <span>
-            <TextField
-              settingKey="databaseLocation"
-              label="Database Directory"
-              size={61}
-              readOnly
-            />
-            <OpenFolder target="database" label={t('Open Database Directory')} />
-          </span>
-        </Section>
+            </Section>
+          )
+        })}
       </div>
     </div>
   )
