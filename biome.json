@@ -1,0 +1,73 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": [
+      "**",
+      "!src/app",
+      "!out",
+      "!release",
+      "!resources",
+      "!patches",
+      "!docs",
+      "!i18n-unused.config.js"
+    ]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "src/renderer/src/components/Player.tsx",
+        "src/renderer/src/components/MovieDetail.tsx",
+        "src/renderer/src/components/ShowDetail.tsx",
+        "src/renderer/src/components/Poster.tsx",
+        "src/renderer/src/components/QualitySelector.tsx",
+        "src/renderer/src/components/LangDropdown.tsx",
+        "src/renderer/src/components/PlayerChooser.tsx",
+        "src/renderer/src/components/LoadingScreen.tsx",
+        "src/renderer/src/components/Initializing.tsx",
+        "src/renderer/src/components/FilterBar.tsx",
+        "src/renderer/src/components/PosterGrid.tsx",
+        "src/renderer/src/routes/FileSelectorPage.tsx",
+        "src/renderer/src/routes/TorrentCollectionPage.tsx",
+        "src/renderer/src/routes/SeedboxPage.tsx",
+        "src/renderer/src/routes/AboutPage.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "noStaticElementInteractions": "off",
+            "useKeyWithClickEvents": "off",
+            "useSemanticElements": "off",
+            "useAnchorContent": "off",
+            "useValidAnchor": "off",
+            "useMediaCaption": "off",
+            "noLabelWithoutControl": "off",
+            "noNoninteractiveElementToInteractiveRole": "off"
+          }
+        }
+      }
+    }
+  ],
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "asNeeded",
+      "trailingCommas": "all"
+    }
+  }
+}

@@ -1,5 +1,15 @@
 # Popcorn Time Desktop
 
+## Main process architecture
+
+Rules for anything under `src/main/` or `src/shared/`:
+
+- Services are Effect `Layer`s, composed from a single root in the main process.
+- `Effect.runPromise` lives at the IPC handler boundary and nowhere else.
+- Failures are tagged errors from `src/shared/errors.ts`; never throw strings.
+- Scoped resources use `Scope` + `acquireRelease`, never manual cleanup flags.
+- The renderer imports only from `src/shared/`, never from `src/main/`.
+
 ## Agent skills
 
 ### Issue tracker

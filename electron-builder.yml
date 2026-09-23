@@ -1,0 +1,76 @@
+# electron-builder packaging, replacing the legacy nw-builder/gulp/`dist` scripts.
+appId: app.popcorntime.desktop
+productName: Popcorn Time
+copyright: Copyright © Popcorn Time
+
+directories:
+  buildResources: build
+  output: release
+
+# electron-vite writes the main, preload and renderer bundles into `out`.
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+# better-sqlite3 is a native module and cannot be read from inside the asar archive.
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+
+# `app.js` accepted magnets as arguments; the installers register the same handlers.
+protocols:
+  - name: Magnet
+    schemes:
+      - magnet
+fileAssociations:
+  - ext: torrent
+    name: BitTorrent File
+    mimeType: application/x-bittorrent
+    role: Viewer
+
+# `electron-updater` reads `latest.yml`/`latest-mac.yml`/`latest-linux.yml` from the
+# releases of this repository. POPCORN_UPDATE_URL overrides the feed at runtime.
+publish:
+  provider: github
+  owner: Daelars
+  repo: popcorn-desktop
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerSidebar: build/installer-sidebar.bmp
+  uninstallerSidebar: build/uninstaller-sidebar.bmp
+  shortcutName: Popcorn Time
+  artifactName: Popcorn-Time-${version}-${arch}-Setup.${ext}
+
+mac:
+  icon: build/icon.icns
+  category: public.app-category.entertainment
+  target:
+    - dmg
+
+linux:
+  icon: build/icon.png
+  category: AudioVideo
+  synopsis: Watch Movies and TV Shows instantly
+  maintainer: Daelars <Daelars@users.noreply.github.com>
+  target:
+    - AppImage
+    - deb
+  desktop:
+    entry:
+      Name: Popcorn-Time
+      Comment: Watch Movies and TV Shows instantly
+      # The legacy .desktop advertised both of these, and the app opens both.
+      MimeType: application/x-bittorrent;x-scheme-handler/magnet;
+      Categories: AudioVideo
+      StartupNotify: 'false'

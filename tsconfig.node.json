@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": [
+    "electron.vite.config.mts",
+    "vitest.config.mts",
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/shared/**/*",
+    "scripts/**/*",
+    "tests/**/*.ts",
+    "tests/**/*.mts"
+  ],
+  // Renderer tests are .tsx and typecheck under tsconfig.web.json; i18n is the one .ts among them.
+  "exclude": ["tests/i18n.test.ts"]
+}
