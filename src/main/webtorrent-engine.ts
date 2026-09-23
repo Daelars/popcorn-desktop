@@ -19,6 +19,7 @@ function progressStream(torrent: WebTorrentTorrent): Stream.Stream<TorrentProgre
         downloaded: torrent.downloaded,
         uploaded: torrent.uploaded,
         speed: torrent.downloadSpeed,
+        uploadSpeed: torrent.uploadSpeed,
         peers: torrent.numPeers,
         progress: torrent.progress,
         length: torrent.length,

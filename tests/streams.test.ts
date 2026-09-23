@@ -180,6 +180,7 @@ describe('PlaybackTargets', () => {
       downloaded: 1,
       uploaded: 0,
       speed: 1,
+      uploadSpeed: 0,
       peers: 1,
       progress: 0.5,
       length: 10,

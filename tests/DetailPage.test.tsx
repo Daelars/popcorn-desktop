@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { beforeAll, expect, it, vi } from 'vitest'
 import { initI18n } from '../src/renderer/src/i18n'
 import { DetailPage } from '../src/renderer/src/routes/DetailPage'
@@ -75,6 +75,8 @@ function stubBridge(media: unknown, overrides: Record<string, unknown> = {}) {
           return overrides.watchedMovies ?? []
         case 'watched:episodes':
           return overrides.episodes ?? []
+        case 'playback:targets':
+          return [{ kind: 'local', id: 'local', name: 'Popcorn Time' }]
         default:
           return undefined
       }
@@ -92,10 +94,16 @@ function renderDetail() {
       <MemoryRouter initialEntries={['/detail/tt0111161']}>
         <Routes>
           <Route path="/detail/:imdbId" element={<DetailPage />} />
+          <Route path="/select" element={<SelectProbe />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
+}
+
+/** Exposes the query Watch Now navigates to, without rendering the select page. */
+function SelectProbe() {
+  return <div data-testid="select-location">{useLocation().search}</div>
 }
 
 it('renders a movie detail with quality options and marks it watched', async () => {
@@ -140,5 +148,51 @@ it('toggles an episode as watched over IPC', async () => {
   screen.getAllByRole('button', { name: 'Mark watched' })[0]?.click()
   await waitFor(() => {
     expect(calls.some((call) => call.channel === 'watched:markEpisode')).toBe(true)
+  })
+})
+
+const packShow = {
+  type: 'show',
+  imdb_id: 'tt0000001',
+  tvdb_id: 999,
+  title: 'Pack Show',
+  year: 2020,
+  genres: ['Drama'],
+  rating: { percentage: 80 },
+  synopsis: 'Episodes in one season.',
+  episodes: [
+    {
+      season: 1,
+      episode: 1,
+      tvdb_id: 11,
+      title: 'One',
+      torrents: { '1080p': { url: 'magnet:?xt=urn:btih:ep1', provider: 'tpbtv' } },
+    },
+    {
+      season: 1,
+      episode: 2,
+      tvdb_id: 12,
+      title: 'Two',
+      torrents: { '1080p': { url: 'magnet:?xt=urn:btih:ep2', provider: 'tpbtv' } },
+    },
+  ],
+}
+
+it('plays the changed episode when Watch Now is pressed', async () => {
+  stubBridge(packShow)
+  renderDetail()
+
+  await waitFor(() => {
+    expect(screen.getByText('One')).toBeInTheDocument()
+  })
+
+  // The quality selector must re-pick for the new episode; otherwise Watch Now has no torrent.
+  screen.getByRole('link', { name: /Two/ }).click()
+  // Let the remounted selector's effect publish the new episode's default quality.
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  fireEvent.click(document.querySelector('#watch-now') as HTMLElement)
+
+  await waitFor(() => {
+    expect(screen.getByTestId('select-location').textContent).toContain('ep2')
   })
 })

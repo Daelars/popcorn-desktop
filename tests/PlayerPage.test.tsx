@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { beforeAll, expect, it, vi } from 'vitest'
+import { fileSize } from '../src/renderer/src/format'
 import { initI18n } from '../src/renderer/src/i18n'
 import { PlayerPage } from '../src/renderer/src/routes/PlayerPage'
 import type { PopcornBridge } from '../src/shared/ipc'
@@ -88,7 +89,13 @@ beforeAll(async () => {
 const source = 'magnet:?xt=urn:btih:abc'
 const title = 'The Shawshank Redemption'
 
-function stubBridge(options: { show?: unknown; settings?: Record<string, unknown> } = {}) {
+function stubBridge(
+  options: {
+    show?: unknown
+    settings?: Record<string, unknown>
+    captureProgress?: (listener: (payload: unknown) => void) => void
+  } = {},
+) {
   const calls: Array<{ channel: string; payload: unknown }> = []
   const bridge = {
     invoke: async (channel: string, payload: unknown) => {
@@ -109,19 +116,26 @@ function stubBridge(options: { show?: unknown; settings?: Record<string, unknown
           return undefined
       }
     },
-    onProgress: () => () => undefined,
+    onProgress: (listener: (payload: unknown) => void) => {
+      options.captureProgress?.(listener)
+      return () => undefined
+    },
   } as unknown as PopcornBridge
   Object.defineProperty(window, 'popcorn', { value: bridge, configurable: true })
   return calls
 }
 
-function renderPlayer(extra: Record<string, string> = {}) {
+function renderPlayer(extra: Record<string, string> = {}, withHome = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const query = new URLSearchParams({ source, title, quality: '1080p', ...extra })
+  const entries = withHome
+    ? ['/home', `/player?${query.toString()}`]
+    : [`/player?${query.toString()}`]
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`/player?${query.toString()}`]}>
+      <MemoryRouter initialEntries={entries}>
         <Routes>
+          {withHome ? <Route path="/home" element={<div>Home</div>} /> : null}
           <Route path="/player" element={<PlayerPage />} />
         </Routes>
       </MemoryRouter>
@@ -140,6 +154,36 @@ it('starts the stream and renders the legacy player markup', async () => {
   expect(screen.getAllByText(title).length).toBeGreaterThan(0)
   const start = calls.find((call) => call.channel === 'stream:start')
   expect(start?.payload).toMatchObject({ torrentId: source, fileIndex: 0 })
+})
+
+it('shows upload speed, not the uploaded total, in the player stats', async () => {
+  let push: ((payload: unknown) => void) | undefined
+  stubBridge({ captureProgress: (listener) => (push = listener) })
+  renderPlayer()
+
+  await waitFor(() => {
+    expect(document.querySelector('.player')).not.toBeNull()
+  })
+
+  act(() => {
+    push?.({
+      infoHash: 'hash-1',
+      downloaded: 10,
+      uploaded: 999,
+      speed: 1024,
+      uploadSpeed: 2048,
+      peers: 2,
+      progress: 0.5,
+      length: 100,
+      timeRemaining: 0,
+    })
+  })
+
+  await waitFor(() => {
+    const text = document.querySelector('.upload_speed_player')?.textContent ?? ''
+    expect(text).toContain(fileSize(2048))
+    expect(text).not.toContain(fileSize(999))
+  })
 })
 
 it('renders the A-/A+ buttons from the legacy subtitle plugins', async () => {
@@ -284,5 +328,38 @@ it('stops offering the next episode after "No thank you"', async () => {
   await waitFor(() => {
     const overlay = document.querySelector('.playing_next') as HTMLElement | null
     expect(overlay?.style.display).not.toBe('block')
+  })
+})
+
+it('closes to the page before the player after playing the next episode', async () => {
+  const calls = stubBridge({ show: showFixture, settings: { playNextEpisodeAuto: true } })
+  renderPlayer({ imdbId: 'tt0903747', tvdbId: '81189', season: '1', episode: '1' }, true)
+
+  await waitFor(() => {
+    expect(document.querySelector('.player')).not.toBeNull()
+  })
+  playerMock.duration.mockReturnValue(120)
+  playerMock.currentTime.mockReturnValue(80)
+
+  await waitFor(
+    () => {
+      expect(document.querySelector('#nextCountdown')?.textContent).toBe('40')
+    },
+    { timeout: 4000 },
+  )
+  fireEvent.click(screen.getByText('Play Now'))
+  await waitFor(() => {
+    const started = calls.filter((call) => call.channel === 'stream:start')
+    expect(
+      started.some((call) =>
+        String((call.payload as { torrentId?: string }).torrentId).includes('second'),
+      ),
+    ).toBe(true)
+  })
+
+  // Next episode replaces the current history entry, so closing returns home, not the old episode.
+  fireEvent.click(document.querySelector('.close-info-player') as HTMLElement)
+  await waitFor(() => {
+    expect(screen.getByText('Home')).toBeInTheDocument()
   })
 })

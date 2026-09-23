@@ -239,12 +239,18 @@ function runMigration(
     }
 
     const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
+    const insertMeta = db.prepare('INSERT OR IGNORE INTO meta (key, value) VALUES (?, ?)')
     for (const record of settings.records) {
       const key = text(record.key)
       if (key === undefined || record.value === undefined) continue
       // Runtime-derived keys are dropped rather than imported (see RUNTIME_KEYS).
       if (RUNTIME_KEYS.has(key)) continue
       insertSetting.run(key, JSON.stringify(record.value))
+      // The port reads the disclaimer from `meta`, not settings; carry the legacy acceptance
+      // over so a migrated profile does not see it again.
+      if (key === 'disclaimerAccepted' && (record.value === true || record.value === 1)) {
+        insertMeta.run('disclaimerAccepted', JSON.stringify(true))
+      }
       counts.settings += 1
     }
 

@@ -670,7 +670,7 @@ export function Player({
                           <br />
                           <span className="speed-info-player">{t('Upload')}:&nbsp;</span>
                           <span className="upload_speed_player value">
-                            {fileSize(progress?.uploaded ?? 0)}/s
+                            {fileSize(progress?.uploadSpeed ?? 0)}/s
                           </span>
                           <br />
                           <span className="speed-info-player" id="apeersss">
