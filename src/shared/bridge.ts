@@ -53,6 +53,11 @@ export function createBridge(transport: IpcTransport): PopcornBridge {
       listener(Schema.decodeUnknownSync(events['window:openFile'])(payload))
     })
 
+  const onState = (listener: (state: IpcEventPayload<'streams:state'>) => void) =>
+    transport.on('streams:state', (payload) => {
+      listener(Schema.decodeUnknownSync(events['streams:state'])(payload))
+    })
+
   const onUpdateStatus = (listener: (status: IpcEventPayload<'updates:status'>) => void) =>
     transport.on('updates:status', (payload) => {
       listener(Schema.decodeUnknownSync(events['updates:status'])(payload))
@@ -62,6 +67,7 @@ export function createBridge(transport: IpcTransport): PopcornBridge {
   return {
     invoke: invoke as PopcornBridge['invoke'],
     onProgress,
+    onState,
     onOpenFile,
     onUpdateStatus,
     pathForFile: transport.pathForFile,

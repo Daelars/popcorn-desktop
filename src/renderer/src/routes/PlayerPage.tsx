@@ -48,6 +48,7 @@ export function PlayerPage() {
   const [localTitle, setLocalTitle] = useState('')
   const [subtitles, setSubtitles] = useState<ReadonlyArray<SubtitleTrack>>([])
   const sessionPort = useRef<number | undefined>(undefined)
+  const sessionId = useRef<string | undefined>(undefined)
   const sessionKind = useRef<'stream' | 'local'>('stream')
   const chosenPlayer = useSetting('chosenPlayer').data ?? 'local'
 
@@ -119,9 +120,8 @@ export function PlayerPage() {
     const kind = localPath === '' ? 'stream' : 'local'
     sessionKind.current = kind
     const stop = (port: number) =>
-      kind === 'local'
-        ? bridge.invoke('local:stop', { port })
-        : bridge.invoke('stream:stop', { port })
+      kind === 'local' ? bridge.invoke('local:stop', { port }) : Promise.resolve(undefined)
+    const stopStream = (id: string) => bridge.invoke('stream:stop', { id })
     const start =
       kind === 'stream'
         ? bridge.invoke('stream:start', {
@@ -134,7 +134,8 @@ export function PlayerPage() {
       .then(async (session) => {
         if (cancelled) {
           // React's StrictMode runs effects twice; the first session must not leak a server.
-          void stop(session.port).catch(() => undefined)
+          if ('id' in session) void stopStream(session.id).catch(() => undefined)
+          else void stop(session.port).catch(() => undefined)
           return
         }
         let tracks: ReadonlyArray<SubtitleTrack> = []
@@ -176,11 +177,13 @@ export function PlayerPage() {
           }
         }
         if (cancelled) {
-          void stop(session.port).catch(() => undefined)
+          if ('id' in session) void stopStream(session.id).catch(() => undefined)
+          else void stop(session.port).catch(() => undefined)
           return
         }
         setSubtitles(tracks)
-        sessionPort.current = session.port
+        if ('id' in session) sessionId.current = session.id
+        else sessionPort.current = session.port
         setSrc(session.url)
       })
       .catch((error: unknown) => {
@@ -188,8 +191,13 @@ export function PlayerPage() {
       })
     return () => {
       cancelled = true
+      const id = sessionId.current
       const port = sessionPort.current
+      sessionId.current = undefined
       sessionPort.current = undefined
+      if (id !== undefined) {
+        void stopStream(id).catch(() => undefined)
+      }
       if (port !== undefined) {
         void stop(port).catch(() => undefined)
       }

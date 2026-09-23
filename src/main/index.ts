@@ -6,7 +6,7 @@ import { makeAppLayer } from './app'
 import { createEventPublisher, registerIpc } from './ipc'
 import { resolveLegacyProfileRoot } from './migration'
 import { type SettingsEnvironment, SettingsService } from './settings'
-import { StreamManager } from './streams'
+import { StreamSession } from './stream-session'
 import { createAutoUpdaterPort, UpdatesService } from './updates'
 import { zoomLevelFor } from './window'
 
@@ -205,11 +205,17 @@ function startApp() {
   const runtime = ManagedRuntime.make(layer)
   registerIpc(ipcMain, runtime)
 
-  // Forward each session's progress to every window through the typed publisher.
+  // Forward every session's progress and loading state to the windows.
   runtime.runFork(
     Stream.runForEach(
-      Stream.unwrap(Effect.map(StreamManager, (manager) => manager.progress)),
+      Stream.unwrap(Effect.map(StreamSession, (session) => session.progress)),
       (progress) => Effect.sync(() => publisher.publish('streams:progress', progress)),
+    ),
+  )
+  runtime.runFork(
+    Stream.runForEach(
+      Stream.unwrap(Effect.map(StreamSession, (session) => session.stateEvents)),
+      (state) => Effect.sync(() => publisher.publish('streams:state', state)),
     ),
   )
 
