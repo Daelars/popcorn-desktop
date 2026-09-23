@@ -105,7 +105,35 @@ function normalizeLangCodes(data: Record<string, string>): Record<string, string
 }
 
 let token: string | undefined
-let searchCache: { imdbId: string; subtitles: Record<string, string> } | undefined
+let searchCache: { key: string; subtitles: Record<string, string> } | undefined
+
+/** Only the formats the converter produces; anything else would become an empty VTT. */
+const SUPPORTED_FORMATS: ReadonlySet<string> = new Set(['srt', 'vtt'])
+
+/** Empty format means OpenSubtitles did not say; the download path handles it. */
+export function isSupportedFormat(format: string): boolean {
+  return format === '' || SUPPORTED_FORMATS.has(format.toLowerCase())
+}
+
+/** The `SearchSubtitles` query for a title, including the episode and file identity. */
+export function searchQuery(options: {
+  readonly imdbId: string
+  readonly season?: string
+  readonly episode?: string
+  readonly fileHash?: string
+  readonly fileSize?: number
+}): Record<string, string> {
+  const query: Record<string, string> = {
+    sublanguageid: 'all',
+    imdbid: options.imdbId.replace('tt', ''),
+    limit: 'all',
+  }
+  if (options.season !== undefined) query.season = options.season
+  if (options.episode !== undefined) query.episode = options.episode
+  if (options.fileHash !== undefined) query.moviehash = options.fileHash
+  if (options.fileSize !== undefined) query.moviebytesize = String(options.fileSize)
+  return query
+}
 
 function credentials(username: string, password: string) {
   return { username: username === '' ? '' : username, password: password === '' ? '' : password }
@@ -132,29 +160,37 @@ function login(
   )
 }
 
-/** `OpenSubtitles.prototype.fetch`: `SearchSubtitles` with `limit: all`, grouped per language. */
+/**
+ * `OpenSubtitles.prototype.fetch`: `SearchSubtitles` with `limit: all`, grouped per language.
+ * A show passes `season`/`episode` (and the file's hash/size when known), so it does not get
+ * another episode's subtitles.
+ */
 export function searchSubtitles(options: {
   readonly imdbId: string
   readonly username: string
   readonly password: string
+  readonly season?: string
+  readonly episode?: string
+  readonly fileHash?: string
+  readonly fileSize?: number
   readonly endpoint?: string
 }): Effect.Effect<Record<string, string>, SubtitleError> {
   const endpoint = options.endpoint ?? endpointFromEnv()
+  const cacheKey = `${options.imdbId}:${options.season ?? ''}:${options.episode ?? ''}`
   return Effect.gen(function* () {
     // apibay items without an IMDb id get a synthetic `tt<hash>` key; OpenSubtitles only
     // accepts numeric ids, so those titles simply have no provider subtitles.
     if (!/^tt\d+$/.test(options.imdbId)) return {}
-    if (searchCache !== undefined && searchCache.imdbId === options.imdbId) {
+    if (searchCache !== undefined && searchCache.key === cacheKey) {
       return searchCache.subtitles
     }
     const credentials_ = credentials(options.username, options.password)
     const session = token ?? (yield* login(endpoint, credentials_.username, credentials_.password))
     token = session
 
-    const response = yield* call(endpoint, 'SearchSubtitles', [
-      session,
-      [{ sublanguageid: 'all', imdbid: options.imdbId.replace('tt', ''), limit: 'all' }],
-    ])
+    const query = searchQuery(options)
+
+    const response = yield* call(endpoint, 'SearchSubtitles', [session, [query]])
     const record = response as { status?: string; data?: unknown } | undefined
     if (record?.status !== undefined && record.status !== '200 OK') {
       token = undefined
@@ -168,8 +204,9 @@ export function searchSubtitles(options: {
       const row = entry as Record<string, unknown>
       const url = typeof row.SubDownloadLink === 'string' ? row.SubDownloadLink : ''
       const language = typeof row.SubLanguageID === 'string' ? row.SubLanguageID : ''
-      const format = typeof row.SubFormat === 'string' ? row.SubFormat : ''
+      const format = typeof row.SubFormat === 'string' ? row.SubFormat.toLowerCase() : ''
       if (url === '' || language === '') continue
+      if (!isSupportedFormat(format)) continue
       const code = languageCode(language)
       grouped.set(code, [...(grouped.get(code) ?? []), { url, format }])
     }
@@ -187,7 +224,7 @@ export function searchSubtitles(options: {
       }
     }
     const normalized = normalizeLangCodes(subtitles)
-    searchCache = { imdbId: options.imdbId, subtitles: normalized }
+    searchCache = { key: cacheKey, subtitles: normalized }
     return normalized
   })
 }
@@ -207,15 +244,71 @@ function decompress(buffer: Buffer, contentType: string): Buffer {
   return buffer
 }
 
-/** `generic.js`: charset detection, then an `.srt` is converted and everything becomes VTT. */
-export function subtitleText(buffer: Buffer, contentType = ''): string {
+const FALLBACK_ENCODINGS: ReadonlyArray<string> = ['windows-1252', 'iso-8859-1']
+
+/** `subtitle/generic.js`: each language had its own charset candidates when detection failed. */
+function encodingHints(language: string | undefined): ReadonlyArray<string> {
+  const base = language?.split('|')[0]?.split('-')[0]
+  switch (base) {
+    case 'ru':
+    case 'uk':
+    case 'bg':
+      return ['windows-1251', 'koi8-r']
+    case 'zh':
+      return ['gb18030', 'big5']
+    case 'ja':
+      return ['shift_jis', 'euc-jp']
+    case 'ko':
+      return ['euc-kr']
+    case 'pl':
+    case 'cs':
+    case 'hu':
+      return ['windows-1250', 'iso-8859-2']
+    default:
+      return []
+  }
+}
+
+/** A byte sequence that survives a UTF-8 round trip is UTF-8 (ASCII included). */
+function isUtf8(buffer: Buffer): boolean {
+  const roundTrip = Buffer.from(buffer.toString('utf8'), 'utf8')
+  return roundTrip.length === buffer.length && roundTrip.equals(buffer)
+}
+
+/** Picks the first candidate that decodes without replacement characters. */
+function decodeSubtitle(buffer: Buffer, language?: string): string {
+  if (isUtf8(buffer)) return buffer.toString('utf8')
+  const detected = chardet.detect(buffer)
+  const candidates = [
+    ...encodingHints(language),
+    ...(detected === null ? [] : [detected]),
+    ...FALLBACK_ENCODINGS,
+  ]
+  let best: { text: string; bad: number } | undefined
+  for (const encoding of new Set(candidates)) {
+    try {
+      const text = iconv.decode(buffer, encoding)
+      const bad = (text.match(/\uFFFD/g) ?? []).length
+      if (bad === 0) return text
+      if (best === undefined || bad < best.bad) best = { text, bad }
+    } catch {
+      // Unknown encoding name; try the next candidate.
+    }
+  }
+  return best?.text ?? iconv.decode(buffer, 'utf8')
+}
+
+/** `generic.js`: charset detection with a per-language fallback, then `.srt` becomes VTT. */
+export function subtitleText(buffer: Buffer, contentType = '', language?: string): string {
   const decompressed = decompress(buffer, contentType)
-  const detected = chardet.detect(decompressed) ?? 'utf8'
-  const text = iconv.decode(decompressed, detected)
+  const text = decodeSubtitle(decompressed, language)
   return /^WEBVTT/m.test(text) ? text : srtToVtt(text)
 }
 
-export function downloadSubtitle(url: string): Effect.Effect<string, SubtitleError> {
+export function downloadSubtitle(
+  url: string,
+  language?: string,
+): Effect.Effect<string, SubtitleError> {
   return Effect.tryPromise({
     try: async () => {
       const response = await fetch(url, {
@@ -225,18 +318,22 @@ export function downloadSubtitle(url: string): Effect.Effect<string, SubtitleErr
       })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const buffer = Buffer.from(await response.arrayBuffer())
-      return subtitleText(buffer, response.headers.get('content-type') ?? '')
+      return subtitleText(buffer, response.headers.get('content-type') ?? '', language)
     },
     catch: (cause) => new SubtitleError({ message: `cannot download ${url}`, source: url, cause }),
   })
 }
 
-/** The player asks for one language; the search result is cached per imdb id. */
+/** The player asks for one language; the search result is cached per imdb id and episode. */
 export function fetchSubtitle(options: {
   readonly imdbId: string
   readonly lang: string
   readonly username: string
   readonly password: string
+  readonly season?: string
+  readonly episode?: string
+  readonly fileHash?: string
+  readonly fileSize?: number
 }): Effect.Effect<string, SubtitleError> {
   return Effect.gen(function* () {
     const subtitles = yield* searchSubtitles(options)
@@ -246,7 +343,7 @@ export function fetchSubtitle(options: {
         new SubtitleError({ message: `no ${options.lang} subtitle`, source: options.imdbId }),
       )
     }
-    return yield* downloadSubtitle(url)
+    return yield* downloadSubtitle(url, options.lang)
   })
 }
 
