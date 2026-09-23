@@ -9,6 +9,7 @@ type Emit = (progress: {
   downloaded: number
   uploaded: number
   speed: number
+  uploadSpeed: number
   peers: number
   progress: number
   length: number
@@ -176,6 +177,7 @@ describe('StreamManager', () => {
             downloaded: 1,
             uploaded: 0,
             speed: 2,
+            uploadSpeed: 1,
             peers: 3,
             progress: 0.5,
             length: 100,
@@ -192,6 +194,7 @@ describe('StreamManager', () => {
         downloaded: 1,
         uploaded: 0,
         speed: 2,
+        uploadSpeed: 1,
         peers: 3,
         progress: 0.5,
       })

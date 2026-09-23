@@ -28,6 +28,8 @@ export interface TorrentProgress {
   readonly downloaded: number
   readonly uploaded: number
   readonly speed: number
+  /** Bytes per second; `uploaded` is the running total, which the UI mistook for this. */
+  readonly uploadSpeed: number
   readonly peers: number
   readonly progress: number
   readonly length: number
