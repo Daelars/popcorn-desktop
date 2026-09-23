@@ -9,7 +9,10 @@ beforeAll(async () => {
   await initI18n()
 })
 
-function stubBridge(settings: Record<string, unknown> = {}) {
+function stubBridge(
+  settings: Record<string, unknown> = {},
+  disclaimer: () => Promise<unknown> = async () => ({ accepted: true }),
+) {
   const bridge = {
     invoke: async (channel: string) => {
       switch (channel) {
@@ -27,6 +30,8 @@ function stubBridge(settings: Record<string, unknown> = {}) {
         case 'media:getMovie':
         case 'media:getShow':
           return undefined
+        case 'disclaimer:status':
+          return disclaimer()
         default:
           return undefined
       }
@@ -89,5 +94,24 @@ it('applies the theme from settings', async () => {
   renderApp()
   await waitFor(() => {
     expect(document.documentElement.dataset.theme).toBe('Official_-_Light_theme')
+  })
+})
+
+it('hides the disclaimer when it is already accepted', async () => {
+  stubBridge()
+  renderApp()
+  await waitFor(() => {
+    expect(screen.getByRole('link', { name: 'Movies' })).toBeInTheDocument()
+  })
+  expect(screen.queryByText('Terms of Service')).not.toBeInTheDocument()
+})
+
+it('shows the disclaimer when the status check fails', async () => {
+  stubBridge({}, async () => {
+    throw new Error('ipc down')
+  })
+  renderApp()
+  await waitFor(() => {
+    expect(screen.getByText('Terms of Service')).toBeInTheDocument()
   })
 })
