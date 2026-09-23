@@ -1,6 +1,7 @@
 import type { Filters, Movie, Provider } from '../../shared'
 import { fetchText, parseNyaa } from '../search'
-import { BaseProvider, type ProviderConfig, type ProviderPage } from './base'
+import { BaseProvider, type ProviderConfig, type ProviderFilters, type ProviderPage } from './base'
+import { imdbIdFromMagnet, qualityOf, yearOf } from './release'
 
 /**
  * The anime tab's browse source. The legacy anime API is gone, so this reads nyaa.si's
@@ -13,18 +14,11 @@ export const NYAA_ANIME_CONFIG: ProviderConfig = {
   uniqueId: 'imdb_id',
   tabName: 'Anime',
   type: 'anime',
+  capabilities: { search: true, sort: ['seeds'], quality: false, genres: false },
 }
 
 /** `1_2` is nyaa's Anime / English-translated category. */
 const ANIME_CATEGORY = '1_2'
-const QUALITY = /\b(2160p|1440p|1080p|720p|480p|360p)\b/i
-const YEAR = /\b(19\d{2}|20\d{2})\b/
-
-/** nyaa has no IMDb ids; the info hash keeps the cache key and the detail route stable. */
-function imdbIdOf(magnet: string): string {
-  const hash = /btih:([0-9a-z]+)/i.exec(magnet)?.[1]?.toLowerCase() ?? magnet
-  return `tt${hash.slice(0, 7)}`
-}
 
 export class NyaaAnimeApi extends BaseProvider<Movie> {
   async fetch(filters: Filters): Promise<ProviderPage<Movie>> {
@@ -33,12 +27,12 @@ export class NyaaAnimeApi extends BaseProvider<Movie> {
     const url = `https://nyaa.si/?f=0&c=${ANIME_CATEGORY}&q=${encodeURIComponent(query)}&s=seeders&o=desc&page=${page}`
     const results = parseNyaa(await fetchText(url))
     const items: Movie[] = results.map((result) => {
-      const quality = (QUALITY.exec(result.title)?.[1] ?? '1080p').toLowerCase()
+      const quality = qualityOf(result.title)
       return {
         type: 'movie',
-        imdb_id: imdbIdOf(result.magnet) as Movie['imdb_id'],
+        imdb_id: imdbIdFromMagnet(result.magnet) as Movie['imdb_id'],
         title: result.title,
-        year: Number(YEAR.exec(result.title)?.[1] ?? new Date().getFullYear()),
+        year: yearOf(result.title),
         genre: [],
         rating: 0,
         image: false,
@@ -67,11 +61,8 @@ export class NyaaAnimeApi extends BaseProvider<Movie> {
     return { results: items, hasMore: items.length > 0 }
   }
 
-  async formatFilters(): Promise<{
-    genres: Record<string, string>
-    sorters: Record<string, string>
-  }> {
-    return { genres: { All: 'All' }, sorters: { Trending: 'seeds' } }
+  async formatFilters(): Promise<ProviderFilters> {
+    return { genres: { All: 'All' }, sorters: { seeds: 'Trending' } }
   }
 }
 

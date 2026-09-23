@@ -7,6 +7,7 @@ export const MOVIE_API_CONFIG: ProviderConfig = {
   tabName: 'Movies',
   type: 'movie',
   metadata: 'trakttv:movie-metadata',
+  capabilities: { search: true, sort: [], quality: true, genres: true },
 }
 
 interface RawMovie {

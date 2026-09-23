@@ -129,11 +129,12 @@ const handlers = {
   'watched:unmarkEpisode': (episode) =>
     Effect.flatMap(DatabaseService, (database) => database.watched.unmarkEpisode(episode)),
   'browse:providers': () =>
-    Effect.map(ProvidersService, (entries) => entries.map((entry) => entry.descriptor)),
-  'browse:fetch': ({ provider, filters }) =>
-    Effect.flatMap(CatalogService, (catalog) => catalog.fetch(provider, filters)),
-  'browse:filters': ({ provider }) =>
-    Effect.flatMap(CatalogService, (catalog) => catalog.filters(provider)),
+    Effect.flatMap(ProvidersService, (providers) => providers.entries).pipe(
+      Effect.map((entries) => entries.map((entry) => entry.descriptor)),
+    ),
+  'browse:fetch': ({ tab, filters }) =>
+    Effect.flatMap(CatalogService, (catalog) => catalog.fetch(tab, filters)),
+  'browse:filters': ({ tab }) => Effect.flatMap(CatalogService, (catalog) => catalog.filters(tab)),
   'media:getMovie': ({ imdbId }) =>
     Effect.flatMap(DatabaseService, (database) => database.media.getMovie(imdbId)),
   'media:getShow': ({ imdbId }) =>
