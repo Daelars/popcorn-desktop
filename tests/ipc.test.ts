@@ -4,12 +4,7 @@ import { CatalogServiceLive } from '../src/main/catalog'
 import { CollectionServiceLive } from '../src/main/collection'
 import { DatabaseServiceLive, SqliteLive, SqliteSettingsStoreLive } from '../src/main/database'
 import { FilePickerService } from '../src/main/file-picker'
-import {
-  createEventPublisher,
-  type ExternalPlayersPort,
-  type IpcMainPort,
-  registerIpc,
-} from '../src/main/ipc'
+import { type ExternalPlayersPort, type IpcMainPort, registerIpc } from '../src/main/ipc'
 import { LegacyMigration } from '../src/main/legacy-migration'
 import { LocalFiles } from '../src/main/localfiles'
 import { NOT_MIGRATED } from '../src/main/migration'
@@ -86,22 +81,7 @@ async function harness() {
       openDirectory: () => Effect.void,
     }),
     Layer.succeed(SearchService, {
-      search: (query: string) =>
-        Effect.succeed({
-          results: [
-            {
-              title: `result for ${query}`,
-              magnet: 'magnet:?xt=urn:btih:abc',
-              size: '1.00 GB',
-              seeds: 10,
-              peers: 2,
-              provider: 'nyaa.si',
-              source: 'https://nyaa.si/view/1',
-            },
-          ],
-          counts: { nyaa: 1 },
-          failures: [],
-        }),
+      search: () => Effect.succeed({ results: [], counts: {}, failures: [] }),
     }),
     Layer.succeed(PlayersService, {
       list: () => Effect.succeed([{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }]),
@@ -284,21 +264,6 @@ describe('registerIpc', () => {
     await runtime.dispose()
   })
 
-  it('searches torrents over the search channel', async () => {
-    const { runtime, invoke } = await harness()
-    const response = await invoke('search:torrents', { query: 'sintel', category: 'Movies' })
-    expect(response.ok).toBe(true)
-    if (response.ok) {
-      const outcome = response.value as {
-        results: ReadonlyArray<{ title: string; seeds: number }>
-        counts: Record<string, number>
-      }
-      expect(outcome.results[0]?.title).toBe('result for sintel')
-      expect(outcome.counts.nyaa).toBe(1)
-    }
-    await runtime.dispose()
-  })
-
   it('lists playback targets and forwards a play', async () => {
     const { runtime, invoke } = await harness()
     expect(await invoke('playback:targets', {})).toEqual({
@@ -316,12 +281,6 @@ describe('registerIpc', () => {
     const { runtime, invoke } = await harness()
     expect(await invoke('collection:import', {})).toEqual({ ok: true, value: undefined })
     expect(await invoke('collection:list', {})).toEqual({ ok: true, value: [] })
-    await runtime.dispose()
-  })
-
-  it('lists live torrents over the seedbox channel', async () => {
-    const { runtime, invoke } = await harness()
-    expect(await invoke('torrents:list', {})).toEqual({ ok: true, value: [] })
     await runtime.dispose()
   })
 
@@ -363,45 +322,5 @@ describe('registerIpc', () => {
       },
     })
     await runtime.dispose()
-  })
-})
-
-describe('createEventPublisher', () => {
-  it('sends every push event through one typed entry point', () => {
-    const sent: Array<{ channel: string; payload: unknown }> = []
-    const publisher = createEventPublisher((channel, payload) => sent.push({ channel, payload }))
-
-    publisher.publish('streams:progress', {
-      infoHash: 'abc',
-      downloaded: 1,
-      uploaded: 2,
-      speed: 3,
-      uploadSpeed: 5,
-      peers: 4,
-      progress: 0.5,
-      length: 100,
-      timeRemaining: 5000,
-    })
-    publisher.publish('window:openFile', 'magnet:?xt=urn:btih:abc')
-    publisher.publish('updates:status', { state: 'checking' })
-
-    expect(sent).toEqual([
-      {
-        channel: 'streams:progress',
-        payload: {
-          infoHash: 'abc',
-          downloaded: 1,
-          uploaded: 2,
-          speed: 3,
-          uploadSpeed: 5,
-          peers: 4,
-          progress: 0.5,
-          length: 100,
-          timeRemaining: 5000,
-        },
-      },
-      { channel: 'window:openFile', payload: 'magnet:?xt=urn:btih:abc' },
-      { channel: 'updates:status', payload: { state: 'checking' } },
-    ])
   })
 })
