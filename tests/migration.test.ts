@@ -118,17 +118,14 @@ describe('migrateLegacy', () => {
       value: 'true',
     })
     // The magnet keeps its link; the `.torrent` file is referenced by path.
-    expect(
-      db.prepare('SELECT name, source FROM torrent_collection ORDER BY name').all(),
-    ).toEqual([
+    expect(db.prepare('SELECT name, source FROM torrent_collection ORDER BY name').all()).toEqual([
       {
         name: 'Series Pack.torrent',
         source: `file:${join(legacyRoot, 'data', 'TorrentCollection', 'Series Pack.torrent')}`,
       },
       {
         name: 'Some Movie 2020',
-        source:
-          'magnet:?xt=urn:btih:AAAABBBBCCCCDDDDEEEEFFFF0000111122223333&dn=Some+Movie+2020',
+        source: 'magnet:?xt=urn:btih:AAAABBBBCCCCDDDDEEEEFFFF0000111122223333&dn=Some+Movie+2020',
       },
     ])
     expect(existsSync(join(backupDir, 'bookmarks.db'))).toBe(true)

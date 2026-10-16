@@ -1,4 +1,4 @@
-import { cpSync, type Dirent, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { cpSync, type Dirent, existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Database as SqliteDatabase } from 'better-sqlite3'
 import { Effect, Layer } from 'effect'
@@ -392,9 +392,7 @@ function runMigration(
       `[migration] no legacy TorrentCollection folder; checked ${collection.checked.join(', ')}`,
     )
   } else {
-    console.log(
-      `[migration] imported ${counts.collection} torrent(s) from ${collection.folder}`,
-    )
+    console.log(`[migration] imported ${counts.collection} torrent(s) from ${collection.folder}`)
   }
 
   const skipped: string[] = []
