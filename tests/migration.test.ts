@@ -5,7 +5,14 @@ import { Effect, Layer, ManagedRuntime } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { openDatabase, Sqlite } from '../src/main/database'
 import { LegacyMigration } from '../src/main/legacy-migration'
-import { LegacyMigrationLive, migrateLegacy, resolveLegacyProfileRoot } from '../src/main/migration'
+import {
+  LegacyMigrationLive,
+  legacyCollectionCandidates,
+  migrateLegacy,
+  readLegacyCollection,
+  resolveLegacyCollection,
+  resolveLegacyProfileRoot,
+} from '../src/main/migration'
 import { MigrationError } from '../src/shared/errors'
 
 function fixtureProfile(): { legacyRoot: string; backupDir: string } {
@@ -57,6 +64,18 @@ function fixtureProfile(): { legacyRoot: string; backupDir: string } {
     join(dataDir, 'shows.db'),
     JSON.stringify({ imdb_id: 'tt0944947', tvdb_id: 121361, title: 'Game of Thrones' }),
   )
+
+  // The legacy collection: a magnet stored as a text file, a `.torrent` file, a non-magnet
+  // text file and a directory whose name contains `.torrent`.
+  const collectionDir = join(dataDir, 'TorrentCollection')
+  mkdirSync(collectionDir, { recursive: true })
+  writeFileSync(
+    join(collectionDir, 'Some Movie 2020'),
+    'magnet:?xt=urn:btih:AAAABBBBCCCCDDDDEEEEFFFF0000111122223333&dn=Some+Movie+2020',
+  )
+  writeFileSync(join(collectionDir, 'Series Pack.torrent'), 'd8:announce0:4:infod4:name...')
+  writeFileSync(join(collectionDir, 'notes.txt'), 'not a magnet link')
+  mkdirSync(join(collectionDir, 'nested.torrent'), { recursive: true })
   mkdirSync(join(root, 'Local Storage', 'leveldb'), { recursive: true })
 
   return { legacyRoot: root, backupDir: join(root, 'backup-legacy') }
@@ -77,6 +96,7 @@ describe('migrateLegacy', () => {
       settings: 3,
       movies: 1,
       shows: 1,
+      collection: 2,
     })
     expect(result.malformedLines).toBe(1)
     expect(result.skipped).toContain(
@@ -97,7 +117,19 @@ describe('migrateLegacy', () => {
     expect(db.prepare('SELECT value FROM meta WHERE key = ?').get('disclaimerAccepted')).toEqual({
       value: 'true',
     })
+    // The magnet keeps its link; the `.torrent` file is referenced by path.
+    expect(db.prepare('SELECT name, source FROM torrent_collection ORDER BY name').all()).toEqual([
+      {
+        name: 'Series Pack.torrent',
+        source: `file:${join(legacyRoot, 'data', 'TorrentCollection', 'Series Pack.torrent')}`,
+      },
+      {
+        name: 'Some Movie 2020',
+        source: 'magnet:?xt=urn:btih:AAAABBBBCCCCDDDDEEEEFFFF0000111122223333&dn=Some+Movie+2020',
+      },
+    ])
     expect(existsSync(join(backupDir, 'bookmarks.db'))).toBe(true)
+    expect(existsSync(join(backupDir, 'TorrentCollection', 'Series Pack.torrent'))).toBe(true)
   })
 
   it('runs once and is idempotent', () => {
@@ -121,7 +153,56 @@ describe('migrateLegacy', () => {
 
     expect(result.migrated).toBe(true)
     expect(result.counts.bookmarks).toBe(0)
+    expect(result.counts.collection).toBe(0)
     expect(result.skipped).toEqual([])
+  })
+})
+
+describe('legacy torrent collection', () => {
+  it('prefers the data/ folder and falls back to the older root-level one', () => {
+    const root = mkdtempSync(join(tmpdir(), 'popcorn-collection-'))
+    const dataFolder = join(root, 'data', 'TorrentCollection')
+    const rootFolder = join(root, 'TorrentCollection')
+    const existsIn =
+      (...paths: string[]) =>
+      (candidate: string) =>
+        paths.includes(candidate)
+
+    expect(resolveLegacyCollection(root, existsIn(dataFolder)).folder).toBe(dataFolder)
+    expect(resolveLegacyCollection(root, existsIn(rootFolder)).folder).toBe(rootFolder)
+  })
+
+  it('reports every checked path when the folder is absent', () => {
+    const root = join('home', 'profile')
+    const resolution = resolveLegacyCollection(root, () => false)
+    expect(resolution.folder).toBeUndefined()
+    expect(resolution.checked).toEqual([
+      join(root, 'data', 'TorrentCollection'),
+      join(root, 'TorrentCollection'),
+    ])
+    expect(legacyCollectionCandidates(root)).toEqual(resolution.checked)
+  })
+
+  it('maps magnets to their link, torrents to file: paths, and skips the rest', () => {
+    const root = mkdtempSync(join(tmpdir(), 'popcorn-collection-'))
+    const folder = join(root, 'data', 'TorrentCollection')
+    mkdirSync(folder, { recursive: true })
+    writeFileSync(join(folder, 'A Movie'), 'magnet:?xt=urn:btih:ABCDEF')
+    writeFileSync(join(folder, 'Pack.torrent'), 'binary-ish')
+    writeFileSync(join(folder, 'readme.txt'), 'hello')
+    mkdirSync(join(folder, 'weird.torrent'), { recursive: true })
+
+    const entries = readLegacyCollection(folder)
+
+    expect(
+      [...entries]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((entry) => [entry.name, entry.source]),
+    ).toEqual([
+      ['A Movie', 'magnet:?xt=urn:btih:ABCDEF'],
+      ['Pack.torrent', `file:${join(folder, 'Pack.torrent')}`],
+    ])
+    expect(entries.every((entry) => entry.addedAt !== '')).toBe(true)
   })
 })
 
