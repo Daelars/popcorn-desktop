@@ -230,6 +230,7 @@ describe('PlaybackTargets', () => {
       open: () => Effect.succeed({ id: 'session-1' }),
       states: () => Stream.empty,
       current: () => Effect.succeed(ready),
+      markPlayingExternally: () => Effect.void,
       stateEvents: Stream.empty,
       close: (id: string) => Effect.sync(() => void closed.push(id)),
       closeAll: () => Effect.void,
@@ -270,6 +271,45 @@ describe('PlaybackTargets', () => {
     await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.play(external, 'session-1')))
     expect(launched).toEqual(['VLC'])
 
+    await runtime.dispose()
+  })
+
+  it('emits playingExternally when an external target takes over a ready session', async () => {
+    const engine = fakeHandle()
+    const subtitles = Layer.succeed(SubtitlesService, {
+      list: () => Effect.succeed({ subtitles: {} }),
+      fetch: () => Effect.die('unused'),
+    })
+    const streams = StreamSessionLive.pipe(Layer.provide(Layer.mergeAll(engine.layer, subtitles)))
+    const players = Layer.succeed(PlayersService, {
+      list: () => Effect.succeed([{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }]),
+      play: () => Effect.void,
+    })
+    const targets = PlaybackTargetsLive.pipe(Layer.provide(Layer.mergeAll(players, streams)))
+    const runtime = ManagedRuntime.make(Layer.mergeAll(streams, targets))
+
+    const names = await runtime.runPromise(
+      Effect.gen(function* () {
+        const session = yield* StreamSession
+        const playback = yield* PlaybackTargets
+        const { id } = yield* session.open(request)
+        const target = (yield* playback.list).find((candidate) => candidate.id === 'VLC')
+        if (target === undefined) throw new Error('expected an external target')
+        // Hand the ready session to the player as soon as it comes up, then collect until the
+        // session reports the external state.
+        const collected = yield* session.states(id).pipe(
+          Stream.tap((state) =>
+            state.state === 'ready' ? playback.play(target, id) : Effect.void,
+          ),
+          Stream.takeUntil((state) => state.state === 'playingExternally'),
+          Stream.runCollect,
+          Effect.timeout('5 seconds'),
+        )
+        return Array.from(collected).map((state) => state.state)
+      }),
+    )
+
+    expect(names).toContain('playingExternally')
     await runtime.dispose()
   })
 })
