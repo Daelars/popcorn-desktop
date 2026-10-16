@@ -10,7 +10,6 @@ import { type PlayerKeyActions, usePlayerKeys } from '../hooks/usePlayerKeys'
 import {
   applySubtitleStyles,
   createVideoEngine,
-  loadCustomSubtitle,
   type SubtitleStyleSettings,
   type VideoEngine,
 } from '../player/engine'
@@ -203,40 +202,22 @@ export function Player({
     container.append(video)
 
     // Trailers take the legacy youtube branch: the youtube tech instead of the plugins.
-    const player = createVideoEngine(
-      video,
-      isTrailer
-        ? {
-            techOrder: ['youtube'],
-            forceSSL: true,
-            ytcontrols: false,
-            quality: '1080p',
-            controls: true,
-            autoplay: true,
-            sources: [{ src, type: 'video/youtube' }],
-          }
-        : {
-            nativeControlsForTouch: false,
-            trackTimeOffset: 0,
-            plugins: {
-              biggerSubtitle: {},
-              smallerSubtitle: {},
-              customSubtitles: {},
-              progressTips: {},
-            },
-            controls: true,
-            autoplay: true,
-            preload: 'auto',
-            sources: [{ src, ...(type === undefined ? {} : { type }) }],
-          },
-    )
+    const player = createVideoEngine(video, {
+      sources: [{ src, ...(type === undefined ? {} : { type }) }],
+      autoplay: true,
+      controls: true,
+      preload: 'auto',
+      trailer: isTrailer,
+    })
     playerRef.current = player
-    // video.js 4 builds its own tech element, so DOM `<track>` children are dropped; tracks
-    // go through the player API and the `videojshooks.js` loader fetches the VTT text itself.
+    // The player owns its tech element, so DOM `<track>` children are dropped; tracks go through
+    // the engine's subtitle API and the adapter's loader fetches the VTT text itself.
     for (const track of subtitles ?? []) {
-      player.addTextTrack('subtitles', track.label, track.language, {
+      player.addSubtitle({
         src: track.src,
-        dflt: track.default === true || track.language === defaultSubtitle,
+        label: track.label,
+        language: track.language,
+        default: track.default === true || track.language === defaultSubtitle,
       })
     }
     player.ready(() => {
@@ -410,7 +391,7 @@ export function Player({
       const player = playerRef.current
       const detail = (event as CustomEvent<{ url?: string }>).detail
       if (player === null || detail?.url === undefined) return
-      loadCustomSubtitle(player, detail.url)
+      player.loadSubtitle(detail.url)
     }
     window.addEventListener('popcorn:subtitle', onDroppedSubtitle)
     return () => window.removeEventListener('popcorn:subtitle', onDroppedSubtitle)
