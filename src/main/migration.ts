@@ -1,4 +1,4 @@
-import { cpSync, existsSync, readFileSync } from 'node:fs'
+import { cpSync, type Dirent, existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Database as SqliteDatabase } from 'better-sqlite3'
 import { Effect, Layer } from 'effect'
@@ -15,6 +15,7 @@ export interface MigrationCounts {
   readonly settings: number
   readonly movies: number
   readonly shows: number
+  readonly collection: number
 }
 
 export interface MigrationResult {
@@ -36,6 +37,7 @@ const EMPTY_COUNTS: MigrationCounts = {
   settings: 0,
   movies: 0,
   shows: 0,
+  collection: 0,
 }
 
 /** The result when migration does not run: no profile found, or it failed and startup recovered. */
@@ -123,6 +125,86 @@ export function parseNedbFile(file: string): {
   return { records, malformed }
 }
 
+/**
+ * The legacy `TorrentCollection/` folder sits inside the same per-platform profile root as the
+ * NeDB files. `main_window.js:342-349` moved an older `<root>/TorrentCollection` under `data/`,
+ * so both are checked, newest location first. Paths are joined from the already-resolved root
+ * (see `legacyProfileCandidates`), so no platform path is hard-coded here.
+ */
+export function legacyCollectionCandidates(legacyRoot: string): ReadonlyArray<string> {
+  return [join(legacyRoot, 'data', 'TorrentCollection'), join(legacyRoot, 'TorrentCollection')]
+}
+
+export interface LegacyCollectionEntry {
+  /** The file name, which the legacy collection template showed verbatim. */
+  readonly name: string
+  /** A magnet link, or `file:<path>` for a stored `.torrent` file. */
+  readonly source: string
+  /** The file's modification time, so the port keeps roughly the legacy insertion order. */
+  readonly addedAt: string
+}
+
+function modifiedAt(path: string): string {
+  try {
+    return statSync(path).mtime.toISOString()
+  } catch {
+    return new Date().toISOString()
+  }
+}
+
+/**
+ * Reads a legacy `TorrentCollection/` folder. Each entry is a file named after its display
+ * name: a `.torrent` file becomes a `file:<path>` source, and any other file is read as a
+ * magnet link. This mirrors `torrent_collection.tpl:72` (the name decides the icon) and
+ * `torrent_collection.js:500-512` (the body decides how it opens). Sub-directories, unreadable
+ * files and non-magnet text are skipped rather than failing the migration.
+ */
+export function readLegacyCollection(folder: string): ReadonlyArray<LegacyCollectionEntry> {
+  let dirents: ReadonlyArray<Dirent>
+  try {
+    dirents = readdirSync(folder, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const entries: Array<LegacyCollectionEntry> = []
+  for (const dirent of dirents) {
+    if (!dirent.isFile()) continue
+    const path = join(folder, dirent.name)
+    if (dirent.name.includes('.torrent')) {
+      entries.push({ name: dirent.name, source: `file:${path}`, addedAt: modifiedAt(path) })
+      continue
+    }
+    let content: string
+    try {
+      content = readFileSync(path, 'utf8').trim()
+    } catch {
+      continue
+    }
+    if (!content.startsWith('magnet:')) continue
+    entries.push({ name: dirent.name, source: content, addedAt: modifiedAt(path) })
+  }
+  return entries
+}
+
+export interface LegacyCollectionResolution {
+  /** The first candidate that exists, or undefined if neither does. */
+  readonly folder: string | undefined
+  /** Every candidate checked, in order, so the caller can log them. */
+  readonly checked: ReadonlyArray<string>
+}
+
+/** Finds the legacy collection folder. `exists` is injectable so tests don't touch the disk. */
+export function resolveLegacyCollection(
+  legacyRoot: string,
+  exists: (path: string) => boolean = existsSync,
+): LegacyCollectionResolution {
+  const checked = legacyCollectionCandidates(legacyRoot)
+  for (const candidate of checked) {
+    if (exists(candidate)) return { folder: candidate, checked }
+  }
+  return { folder: undefined, checked }
+}
+
 function text(value: unknown): string | undefined {
   if (typeof value === 'string') return value
   if (typeof value === 'number') return String(value)
@@ -188,6 +270,10 @@ function runMigration(
     movies.malformed +
     shows.malformed
 
+  const collection = resolveLegacyCollection(legacyRoot)
+  const collectionEntries =
+    collection.folder === undefined ? [] : readLegacyCollection(collection.folder)
+
   const counts: {
     bookmarks: number
     watchedMovies: number
@@ -195,6 +281,7 @@ function runMigration(
     settings: number
     movies: number
     shows: number
+    collection: number
   } = { ...EMPTY_COUNTS }
 
   const migrate = db.transaction(() => {
@@ -274,6 +361,16 @@ function runMigration(
       counts.shows += 1
     }
 
+    // The legacy collection kept magnets as text files and torrents as `file:<path>` entries;
+    // `source` is UNIQUE in the port, so a re-import cannot duplicate a saved torrent.
+    const insertCollected = db.prepare(
+      'INSERT OR IGNORE INTO torrent_collection (name, source, added_at) VALUES (?, ?, ?)',
+    )
+    for (const entry of collectionEntries) {
+      insertCollected.run(entry.name, entry.source, entry.addedAt)
+      counts.collection += 1
+    }
+
     db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(
       MIGRATION_MARKER,
       new Date().toISOString(),
@@ -288,6 +385,16 @@ function runMigration(
       operation: 'migrate',
       cause,
     })
+  }
+
+  if (collection.folder === undefined) {
+    console.log(
+      `[migration] no legacy TorrentCollection folder; checked ${collection.checked.join(', ')}`,
+    )
+  } else {
+    console.log(
+      `[migration] imported ${counts.collection} torrent(s) from ${collection.folder}`,
+    )
   }
 
   const skipped: string[] = []
