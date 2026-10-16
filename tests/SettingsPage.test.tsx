@@ -85,3 +85,44 @@ it('renders rows from the metadata and applies their conditions', async () => {
   // A seedbox-only row stays hidden without the Seedbox feature.
   expect(screen.queryByLabelText('Active Torrents Limit')).toBeNull()
 })
+
+it('renders the OpenSubtitles login block and saves the credentials', async () => {
+  const calls = stubBridge({ projectName: 'Popcorn Time' })
+  renderSettings()
+
+  // The legacy `.opensubtitles-options` credentials form appears while signed out.
+  const username = await screen.findByLabelText('Username')
+  expect(screen.getByLabelText('Password')).toBeInTheDocument()
+  expect(screen.getByText('Connect to OpenSubtitles.org')).toBeInTheDocument()
+
+  fireEvent.change(username, { target: { value: 'fluffy' } })
+  await waitFor(() => {
+    expect(
+      calls.some(
+        (call) =>
+          call.channel === 'settings:set' &&
+          JSON.stringify(call.payload) ===
+            JSON.stringify({ key: 'opensubtitlesUsername', value: 'fluffy' }),
+      ),
+    ).toBe(true)
+  })
+})
+
+it('shows the connected note and disconnects the OpenSubtitles account', async () => {
+  const calls = stubBridge({ opensubtitlesAuthenticated: true, projectName: 'Popcorn Time' })
+  renderSettings()
+
+  const disconnect = await screen.findByText('Disconnect account')
+  expect(screen.queryByLabelText('Username')).toBeNull()
+  fireEvent.click(disconnect)
+  await waitFor(() => {
+    expect(
+      calls.some(
+        (call) =>
+          call.channel === 'settings:set' &&
+          JSON.stringify(call.payload) ===
+            JSON.stringify({ key: 'opensubtitlesAuthenticated', value: false }),
+      ),
+    ).toBe(true)
+  })
+})
