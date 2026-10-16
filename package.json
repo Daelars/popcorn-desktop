@@ -48,6 +48,7 @@
     "rtl-detect": "^1.1.2",
     "video.js": "^4.11.4",
     "videojs-youtube": "1.2.10",
+    "videojs8": "npm:video.js@^8.24.2",
     "webtorrent": "^3.0.21"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
 import { popcorn } from '../bridge'
+import type { VideoEngine, VideoEngineOptions, VideoEngineSubtitle } from './engine'
 import videojs from './videojs'
 
 /**
@@ -110,7 +111,7 @@ function installSubtitleSizePlugins(): void {
  * `CustomTrackMenuItem.loadSubtitle`: one custom track at a time replaces the previous one,
  * then shows it. A subtitle dropped onto the window (`videojs:drop_sub`) lands here too.
  */
-export function loadCustomSubtitle(player: LegacyPlayer, url: string): void {
+function loadCustomSubtitle(player: LegacyPlayer, url: string): void {
   const id = 'vjs_subtitles_00_track'
   // `loadSubtitle` cleaned the previous custom track before adding the new one.
   const tracks = player.textTracks()
@@ -392,4 +393,56 @@ export function installLegacyPlayer(): void {
   installCustomSubtitlesPlugin()
   installProgressTipsPlugin()
   installPlayerHooks()
+}
+
+/**
+ * Maps the neutral options onto the video.js 4 option object the legacy theme expects. Trailer
+ * mode takes the legacy youtube branch (the youtube tech instead of the local plugins).
+ */
+function toVjs4Options(options: VideoEngineOptions): Record<string, unknown> {
+  if (options.trailer) {
+    return {
+      techOrder: ['youtube'],
+      forceSSL: true,
+      ytcontrols: false,
+      quality: '1080p',
+      controls: options.controls,
+      autoplay: options.autoplay,
+      sources: options.sources,
+    }
+  }
+  return {
+    nativeControlsForTouch: false,
+    trackTimeOffset: 0,
+    plugins: {
+      biggerSubtitle: {},
+      smallerSubtitle: {},
+      customSubtitles: {},
+      progressTips: {},
+    },
+    controls: options.controls,
+    autoplay: options.autoplay,
+    preload: options.preload,
+    sources: options.sources,
+  }
+}
+
+/**
+ * Creates a video.js 4 engine behind the neutral interface. Installing the legacy prototype
+ * patches happens here, so the component imports no video.js symbol and the monkey-patching
+ * stays behind this seam. The raw player already has the surface, so the adapter only augments
+ * it with subtitle loading.
+ */
+export function createVjs4Engine(element: HTMLElement, options: VideoEngineOptions): VideoEngine {
+  installLegacyPlayer()
+  const player = videojs(element, toVjs4Options(options))
+  return Object.assign(player, {
+    addSubtitle: (subtitle: VideoEngineSubtitle) => {
+      player.addTextTrack('subtitles', subtitle.label, subtitle.language, {
+        src: subtitle.src,
+        dflt: subtitle.default === true,
+      })
+    },
+    loadSubtitle: (url: string) => loadCustomSubtitle(player, url),
+  })
 }
