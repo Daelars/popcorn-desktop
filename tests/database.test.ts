@@ -15,6 +15,7 @@ import {
   type SettingsEnvironment,
   SettingsService,
   SettingsServiceLive,
+  SettingsStore,
 } from '../src/main/settings'
 
 const environment: SettingsEnvironment = {
@@ -30,6 +31,15 @@ const environment: SettingsEnvironment = {
 
 function databaseRuntime() {
   return ManagedRuntime.make(DatabaseServiceLive.pipe(Layer.provide(SqliteLive(':memory:'))))
+}
+
+/** The database plus the settings store, which share the one in-memory SQLite connection. */
+function maintenanceRuntime() {
+  return ManagedRuntime.make(
+    Layer.mergeAll(DatabaseServiceLive, SqliteSettingsStoreLive).pipe(
+      Layer.provide(SqliteLive(':memory:')),
+    ),
+  )
 }
 
 describe('DatabaseService', () => {
@@ -149,6 +159,142 @@ describe('DatabaseService', () => {
     expect(
       await run(Effect.flatMap(DatabaseService, (db) => db.media.getMovie('tt0000000'))),
     ).toBeUndefined()
+    await runtime.dispose()
+  })
+})
+
+describe('DatabaseService maintenance', () => {
+  it('reports the live schema version and row counts', async () => {
+    const runtime = databaseRuntime()
+    const run = <A, E>(effect: Effect.Effect<A, E, DatabaseService>) => runtime.runPromise(effect)
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.add('tt0111161', 'movie')))
+    await run(Effect.flatMap(DatabaseService, (db) => db.watched.markMovie('tt0111161')))
+
+    const status = await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.status))
+    expect(status.schemaVersion).toBe(2)
+    expect(status.counts.bookmarks).toBe(1)
+    expect(status.counts.watchedMovies).toBe(1)
+    expect(status.counts.settings).toBe(0)
+    await runtime.dispose()
+  })
+
+  it('flushes the bookmarks and watched stores separately', async () => {
+    const runtime = databaseRuntime()
+    const run = <A, E>(effect: Effect.Effect<A, E, DatabaseService>) => runtime.runPromise(effect)
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.add('tt0111161', 'movie')))
+    await run(
+      Effect.flatMap(DatabaseService, (db) => db.media.putMovie('tt0111161', { title: 'X' })),
+    )
+    await run(Effect.flatMap(DatabaseService, (db) => db.watched.markMovie('tt0111161')))
+    await run(Effect.flatMap(DatabaseService, (db) => db.collection.add('Sintel', 'magnet:x')))
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.flush('bookmarks')))
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.list()))).toEqual([])
+    expect(
+      await run(Effect.flatMap(DatabaseService, (db) => db.media.getMovie('tt0111161'))),
+    ).toBeUndefined()
+    // The watched store and the torrent collection are untouched by a bookmarks flush.
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.watched.movies))).toEqual([
+      'tt0111161',
+    ])
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.collection.list))).toHaveLength(1)
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.flush('watched')))
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.watched.movies))).toEqual([])
+    await runtime.dispose()
+  })
+
+  it('rebuilds bookmarks by dropping only their cached snapshots', async () => {
+    const runtime = databaseRuntime()
+    const run = <A, E>(effect: Effect.Effect<A, E, DatabaseService>) => runtime.runPromise(effect)
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.add('tt0111161', 'movie')))
+    await run(
+      Effect.flatMap(DatabaseService, (db) => db.media.putMovie('tt0111161', { title: 'X' })),
+    )
+    await run(
+      Effect.flatMap(DatabaseService, (db) =>
+        db.media.putShow('tt0944947', '121361', { title: 'Y' }),
+      ),
+    )
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.rebuild))
+    // The bookmark survives; its cached metadata is dropped so the catalog refetches it.
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.list()))).toHaveLength(1)
+    expect(
+      await run(Effect.flatMap(DatabaseService, (db) => db.media.getMovie('tt0111161'))),
+    ).toBeUndefined()
+    // An un-bookmarked show's snapshot is left alone.
+    expect(
+      await run(Effect.flatMap(DatabaseService, (db) => db.media.getShow('tt0944947'))),
+    ).toEqual({ title: 'Y' })
+    await runtime.dispose()
+  })
+
+  it('repairs by emptying every user store but keeping the schema', async () => {
+    const runtime = databaseRuntime()
+    const run = <A, E>(effect: Effect.Effect<A, E, DatabaseService>) => runtime.runPromise(effect)
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.add('tt0111161', 'movie')))
+    await run(Effect.flatMap(DatabaseService, (db) => db.watched.markMovie('tt0111161')))
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.repair))
+    const status = await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.status))
+    expect(status.schemaVersion).toBe(2)
+    expect(status.counts.bookmarks).toBe(0)
+    expect(status.counts.watchedMovies).toBe(0)
+    await runtime.dispose()
+  })
+
+  it('exports and re-imports the chosen data types', async () => {
+    const target = join(mkdtempSync(join(tmpdir(), 'popcorn-db-')), 'export.sqlite')
+    const runtime = databaseRuntime()
+    const run = <A, E>(effect: Effect.Effect<A, E, DatabaseService>) => runtime.runPromise(effect)
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.add('tt0111161', 'movie')))
+    await run(
+      Effect.flatMap(DatabaseService, (db) => db.media.putMovie('tt0111161', { title: 'X' })),
+    )
+    await run(Effect.flatMap(DatabaseService, (db) => db.watched.markMovie('tt0111161')))
+    await run(Effect.flatMap(DatabaseService, (db) => db.collection.add('Sintel', 'magnet:x')))
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.export(target)))
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.flush('all')))
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.list()))).toEqual([])
+
+    await run(
+      Effect.flatMap(DatabaseService, (db) =>
+        db.maintenance.import(target, ['bookmarks', 'watched', 'torrents']),
+      ),
+    )
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.list()))).toEqual([
+      { imdbId: 'tt0111161', type: 'movie' },
+    ])
+    expect(
+      await run(Effect.flatMap(DatabaseService, (db) => db.media.getMovie('tt0111161'))),
+    ).toEqual({ title: 'X' })
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.watched.movies))).toEqual([
+      'tt0111161',
+    ])
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.collection.list))).toHaveLength(1)
+    await runtime.dispose()
+  })
+
+  it('resets persisted settings without touching the bookmarks', async () => {
+    const runtime = maintenanceRuntime()
+    const run = <A, E>(effect: Effect.Effect<A, E, DatabaseService | SettingsStore>) =>
+      runtime.runPromise(effect)
+
+    await run(
+      Effect.flatMap(SettingsStore, (store) => store.write('theme', 'Official_-_Light_theme')),
+    )
+    await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.add('tt0111161', 'movie')))
+
+    await run(Effect.flatMap(DatabaseService, (db) => db.maintenance.reset))
+    expect(await run(Effect.flatMap(SettingsStore, (store) => store.read))).toEqual({})
+    expect(await run(Effect.flatMap(DatabaseService, (db) => db.bookmarks.list()))).toHaveLength(1)
     await runtime.dispose()
   })
 })

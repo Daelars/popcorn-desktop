@@ -197,13 +197,7 @@ function Shell({ nativeFrame, isWindows }: { nativeFrame: boolean; isWindows: bo
 
   // `initializing.tpl` was shown while the app booted; our boot ends when settings arrive.
   if (settings.isLoading) {
-    return (
-      <Initializing
-        progress={0.5}
-        status="Loading database"
-        onFix={() => window.location.reload()}
-      />
-    )
+    return <Initializing />
   }
 
   return (

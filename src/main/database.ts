@@ -1,6 +1,8 @@
+import { rmSync } from 'node:fs'
 import BetterSqlite3, { type Database as SqliteDatabase } from 'better-sqlite3'
 import { Context, Effect, Layer } from 'effect'
 import { DbError, SettingsError } from '../shared/errors'
+import type { DatabaseFlushScope, DatabaseImportPart, DatabaseStatus } from '../shared/ipc'
 import { SettingsStore } from './settings'
 
 export class Sqlite extends Context.Tag('Sqlite')<Sqlite, SqliteDatabase>() {}
@@ -107,6 +109,54 @@ export interface SavedTorrent {
   readonly addedAt: string
 }
 
+/** The tables each flush clears, matching `database.js`'s file deletes. */
+const FLUSH_TABLES = {
+  bookmarks: ['bookmarks', 'movies', 'shows'],
+  watched: ['watched_movies', 'watched_episodes'],
+  settings: ['settings'],
+  all: ['bookmarks', 'movies', 'shows', 'watched_movies', 'watched_episodes', 'settings'],
+} as const satisfies Record<DatabaseFlushScope, ReadonlyArray<string>>
+
+/** The tables each import part restores, matching `settings_container.js:importDatabase`. */
+const IMPORT_TABLES = {
+  watched: ['watched_movies', 'watched_episodes'],
+  bookmarks: ['bookmarks', 'movies', 'shows'],
+  torrents: ['torrent_collection'],
+  settings: ['settings'],
+} as const satisfies Record<DatabaseImportPart, ReadonlyArray<string>>
+
+/** Every table's columns, so an import survives a schema whose column order differs. */
+const TABLE_COLUMNS: Record<string, string> = {
+  bookmarks: 'imdb_id, type',
+  movies: 'imdb_id, payload',
+  shows: 'imdb_id, tvdb_id, payload',
+  watched_movies: 'imdb_id, watched_at',
+  watched_episodes: 'tvdb_id, imdb_id, season, episode, watched_at',
+  torrent_collection: 'id, name, source, added_at',
+  settings: 'key, value',
+}
+
+/** The database maintenance the settings page and the initializing screen drive. */
+export interface DatabaseMaintenance {
+  /** `database:status`: the live schema version, journal mode and row counts. */
+  readonly status: Effect.Effect<DatabaseStatus, DbError>
+  /** `flushBookmarks`, `flushWatched`, `resetSettings` and `deleteDatabases`. */
+  readonly flush: (scope: DatabaseFlushScope) => Effect.Effect<void, DbError>
+  /** `rebuildBookmarks`: clear bookmarked titles' cached snapshots so the catalog refetches. */
+  readonly rebuild: Effect.Effect<void, DbError>
+  /** `resetSettings`: drop persisted settings; the defaults apply on the next boot. */
+  readonly reset: Effect.Effect<void, DbError>
+  /** `init_modal.js:fixApp`: clear every user store and re-optimise the database. */
+  readonly repair: Effect.Effect<void, DbError>
+  /** `exportDatabase`: write a consistent single-file copy of the live database. */
+  readonly export: (target: string) => Effect.Effect<void, DbError>
+  /** `importDatabase`: restore the chosen data types from another database file. */
+  readonly import: (
+    source: string,
+    parts: ReadonlyArray<DatabaseImportPart>,
+  ) => Effect.Effect<void, DbError>
+}
+
 export interface DatabaseServiceShape {
   readonly bookmarks: {
     readonly add: (imdbId: string, type: string) => Effect.Effect<void, DbError>
@@ -143,6 +193,8 @@ export interface DatabaseServiceShape {
     ) => Effect.Effect<void, DbError>
     readonly getShow: (imdbId: string) => Effect.Effect<unknown, DbError>
   }
+  /** Flush, rebuild, reset, repair, export and import — the legacy database buttons. */
+  readonly maintenance: DatabaseMaintenance
 }
 
 export class DatabaseService extends Context.Tag('DatabaseService')<
@@ -324,6 +376,69 @@ export const DatabaseServiceLive = Layer.effect(
               | { payload: string }
               | undefined
             return payload(row?.payload)
+          }),
+      },
+      maintenance: {
+        status: tryDb('maintenance.status', () => {
+          const count = (table: string): number =>
+            (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n
+          return {
+            schemaVersion: db.pragma('user_version', { simple: true }) as number,
+            journalMode: String(db.pragma('journal_mode', { simple: true })),
+            counts: {
+              bookmarks: count('bookmarks'),
+              movies: count('movies'),
+              shows: count('shows'),
+              watchedMovies: count('watched_movies'),
+              watchedEpisodes: count('watched_episodes'),
+              torrents: count('torrent_collection'),
+              settings: count('settings'),
+            },
+          }
+        }),
+        flush: (scope) =>
+          tryDb('maintenance.flush', () => {
+            for (const table of FLUSH_TABLES[scope]) db.prepare(`DELETE FROM ${table}`).run()
+          }),
+        rebuild: tryDb('maintenance.rebuild', () => {
+          // `rebuildBookmarks`: keep the bookmarks, drop their cached metadata so the catalog
+          // rehydrates them on the next open. The provider refetch itself lives in the library.
+          db.exec(`
+            DELETE FROM movies WHERE imdb_id IN (SELECT imdb_id FROM bookmarks);
+            DELETE FROM shows WHERE imdb_id IN (SELECT imdb_id FROM bookmarks);
+          `)
+        }),
+        reset: tryDb('maintenance.reset', () => {
+          // `resetSettings`: the defaults are re-applied when SettingsService next builds.
+          db.prepare('DELETE FROM settings').run()
+        }),
+        repair: tryDb('maintenance.repair', () => {
+          // `deleteDatabases()` dropped every user store; here the tables are emptied instead.
+          for (const table of FLUSH_TABLES.all) db.prepare(`DELETE FROM ${table}`).run()
+          db.pragma('optimize')
+        }),
+        export: (target) =>
+          tryDb('maintenance.export', () => {
+            // `VACUUM INTO` writes a consistent copy of the live WAL database. An existing file
+            // is refused, so clear the target first (`exportDatabase` overwrote its zip).
+            rmSync(target, { force: true })
+            db.prepare('VACUUM INTO ?').run(target)
+          }),
+        import: (source, parts) =>
+          tryDb('maintenance.import', () => {
+            db.prepare('ATTACH DATABASE ? AS imported').run(source)
+            try {
+              for (const part of parts) {
+                for (const table of IMPORT_TABLES[part]) {
+                  const columns = TABLE_COLUMNS[table]
+                  db.prepare(
+                    `INSERT OR REPLACE INTO ${table} (${columns}) SELECT ${columns} FROM imported.${table}`,
+                  ).run()
+                }
+              }
+            } finally {
+              db.prepare('DETACH DATABASE imported').run()
+            }
           }),
       },
     })
