@@ -5,6 +5,53 @@ import { popcorn } from './bridge'
 import type { BrowseItem } from './browse'
 import type { LibraryState } from './components/Poster'
 
+/** The Favorites provider's sorters (`providers/favorites.js`), in legacy declaration order. */
+export const librarySorters = ['watched items', 'year', 'title', 'rating'] as const
+export type LibrarySorter = (typeof librarySorters)[number]
+
+/** `filter.js:init` defaults to the first declared sorter. */
+export const defaultLibrarySorter: LibrarySorter = librarySorters[0]
+
+/** Labels for the sorter dropdown; `favorites.js` capitalises the raw keys. */
+export const librarySorterLabels: Readonly<Record<LibrarySorter, string>> = {
+  'watched items': 'Watched Items',
+  year: 'Year',
+  title: 'Title',
+  rating: 'Rating',
+}
+
+/** Narrows a free-form `Filters.sorter` to one of the library's sorters. */
+export function isLibrarySorter(value: string | undefined): value is LibrarySorter {
+  return librarySorters.some((sorter) => sorter === value)
+}
+
+function ratingOf(item: BrowseItem): number {
+  return item.type === 'movie' ? item.rating : item.rating.percentage / 10
+}
+
+/**
+ * Reimplements `favorites.js:sort` for the library. `filter_bar.js:sortBy` gives a newly
+ * selected sorter its default order — title ascending, everything else descending; the order
+ * toggle (re-selecting to flip `order`) is out of scope here.
+ */
+export function sortLibraryItems(
+  items: ReadonlyArray<BrowseItem>,
+  sorter: LibrarySorter,
+  watched: ReadonlySet<string>,
+): ReadonlyArray<BrowseItem> {
+  const sorted = [...items]
+  switch (sorter) {
+    case 'title':
+      return sorted.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()))
+    case 'rating':
+      return sorted.sort((a, b) => ratingOf(b) - ratingOf(a))
+    case 'year':
+      return sorted.sort((a, b) => b.year - a.year)
+    case 'watched items':
+      return sorted.sort((a, b) => Number(watched.has(a.imdb_id)) - Number(watched.has(b.imdb_id)))
+  }
+}
+
 /** Bookmarks and watched movies from the database, keyed by imdb id. */
 export function useLibraryState() {
   return useQuery({
