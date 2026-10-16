@@ -1,10 +1,18 @@
 import { Readable } from 'node:stream'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { describe, expect, it } from 'vitest'
 import type { WebTorrentTorrent } from 'webtorrent'
-import { type SettingsEnvironment, settingsDefaults } from '../src/main/settings'
+import { LegacyMigration } from '../src/main/legacy-migration'
+import { NOT_MIGRATED } from '../src/main/migration'
+import {
+  type SettingsEnvironment,
+  SettingsService,
+  SettingsServiceLive,
+  SettingsStore,
+  settingsDefaults,
+} from '../src/main/settings'
 import { parseRange } from '../src/main/torrent'
-import { handleOf, liveLimits } from '../src/main/webtorrent-engine'
+import { handleOf, liveLimits, subscribeLiveLimits } from '../src/main/webtorrent-engine'
 
 const environment: SettingsEnvironment = {
   tempDir: 'C:/tmp',
@@ -48,6 +56,51 @@ describe('live limits', () => {
       downloadLimit: -1,
       uploadLimit: -1,
     })
+  })
+
+  it('pushes limit changes onto a running client without a restart', async () => {
+    const calls = { download: [] as number[], upload: [] as number[] }
+    const client = {
+      maxConns: 0,
+      throttleDownload: (rate: number) => calls.download.push(rate),
+      throttleUpload: (rate: number) => calls.upload.push(rate),
+    }
+
+    // Drive the real change stream: the subscription the engine installs at startup reacts to
+    // writes made through SettingsService, so this exercises the wiring rather than the helper.
+    const settingsLayer = SettingsServiceLive(environment).pipe(
+      Layer.provide(
+        Layer.succeed(SettingsStore, {
+          read: Effect.succeed({}),
+          write: () => Effect.void,
+        }),
+      ),
+      Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
+    )
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const settings = yield* SettingsService
+          yield* subscribeLiveLimits(settings, client)
+
+          // The subscription attaches in a forked fiber; let it start before writing, as the
+          // engine does at startup, or the first publishes find no subscriber.
+          yield* Effect.sleep('10 millis')
+
+          yield* settings.set('connectionLimit', 12)
+          yield* settings.set('downloadLimit', '2')
+          yield* settings.set('uploadLimit', '1')
+
+          // The subscription drains the change stream in its own fiber; one tick applies it.
+          yield* Effect.yieldNow()
+
+          expect(client.maxConns).toBe(12)
+          expect(calls.download.at(-1)).toBe(2048)
+          expect(calls.upload.at(-1)).toBe(1024)
+        }),
+      ).pipe(Effect.provide(settingsLayer)),
+    )
   })
 })
 
