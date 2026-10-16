@@ -90,3 +90,105 @@ body {
 .filter-bar .nav.right a:hover {
   color: var(--FilterBarTextHover);
 }
+
+/*
+ * Focused RTL mirror for the shell's physical layout rules. `i18n.ts` sets `dir="rtl"` on
+ * <html> for ar/fa/he/ur, but `views.css` is generated from the LTR stylus sources, so the
+ * browse grid, filter bar and titlebar controls need explicit mirrors here. This is the
+ * key layout, not the full 13.4/#59 visual pass.
+ */
+
+[dir="rtl"] .list {
+  left: auto;
+  right: 0;
+}
+
+[dir="rtl"] .list .items,
+[dir="rtl"] .list .items_show,
+[dir="rtl"] .list .items_movie {
+  text-align: right;
+}
+
+[dir="rtl"] .list .items_show,
+[dir="rtl"] .list .items_movie {
+  float: right;
+}
+
+[dir="rtl"] .item {
+  float: right;
+}
+
+/* The overlay controls mirror so the bookmark stays on the leading edge. */
+[dir="rtl"] .item .cover .cover-overlay .actions-favorites {
+  float: left;
+  margin-left: 7px;
+  margin-right: 0;
+}
+
+[dir="rtl"] .item .cover .cover-overlay .actions-watched {
+  float: right;
+  margin-right: 7px;
+  margin-left: 0;
+}
+
+[dir="rtl"] .item .cover .cover-overlay .rating-stars {
+  float: right;
+}
+
+[dir="rtl"] .item .cover .cover-overlay .rating-value {
+  float: left;
+}
+
+[dir="rtl"] .item .seasons {
+  float: left;
+}
+
+/* The filter bar: filters stay beside the tabs and the right group stays end-aligned. */
+[dir="rtl"] .filter-bar .nav.filters {
+  margin-left: 0;
+  margin-right: 10px;
+}
+
+[dir="rtl"] .filter-bar .nav.right {
+  margin-left: 5px;
+  margin-right: auto;
+}
+
+[dir="rtl"] .filter-bar .filter {
+  margin-left: 0;
+  margin-right: 20px;
+}
+
+[dir="rtl"] .filter-bar .filter .value {
+  padding-left: 0;
+  padding-right: 10px;
+}
+
+/* The search box: the magnifier moves to the right edge and the clear button to the left. */
+[dir="rtl"] .filter-bar .search form:before {
+  left: auto;
+  right: 8px;
+}
+
+[dir="rtl"] .filter-bar .search form.edited .clear {
+  right: auto;
+  left: 5px;
+}
+
+[dir="rtl"] .filter-bar .search form input {
+  padding-left: 2px;
+  padding-right: 25px;
+  background-position: left 3px center;
+}
+
+[dir="rtl"] .filter-bar .search form.edited input,
+[dir="rtl"] .filter-bar .search form input:focus,
+[dir="rtl"] .filter-bar .search form input.expanded {
+  padding-left: 2px;
+  padding-right: 28px;
+}
+
+[dir="rtl"] #header .btn-set {
+  left: auto;
+  right: 15px;
+}

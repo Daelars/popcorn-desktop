@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { BrowseItem } from '../browse'
@@ -20,12 +20,17 @@ interface PosterGridProps {
   readonly isLoadingMore: boolean
   readonly onLoadMore: () => void
   readonly onToggleBookmark?: (item: BrowseItem) => void
+  /** `watched` is the current state so the caller can invert it. */
+  readonly onToggleWatched?: (item: BrowseItem, watched: boolean) => void
+  /** Ctrl +/- and Alt+wheel step the poster width; the page persists the setting. */
+  readonly onResizePoster?: (direction: 1 | -1) => void
 }
 
 const FONT_MIN = 0.8
 const FONT_MAX = 1.3
-const WIDTH_MIN = 134
-const WIDTH_MAX = 294
+/** The poster width bounds the legacy `postersMinWidth`/`postersMaxWidth` set. */
+export const POSTER_WIDTH_MIN = 134
+export const POSTER_WIDTH_MAX = 294
 
 /**
  * The legacy grid: `.list > ul.items > li.item` laid out with floats, sized by a runtime
@@ -41,19 +46,160 @@ export function PosterGrid({
   isLoadingMore,
   onLoadMore,
   onToggleBookmark,
+  onToggleWatched,
+  onResizePoster,
 }: PosterGridProps) {
   const { t } = useTranslation()
   const scrollRef = useRef<HTMLUListElement>(null)
   const navigate = useNavigate()
   const posterHeight = Math.round(posterWidth * sizeRatio)
   const fontSize =
-    ((FONT_MAX - FONT_MIN) * ((posterWidth - WIDTH_MIN) / (WIDTH_MAX - WIDTH_MIN)) * 100) / 100 +
+    ((FONT_MAX - FONT_MIN) *
+      ((posterWidth - POSTER_WIDTH_MIN) / (POSTER_WIDTH_MAX - POSTER_WIDTH_MIN)) *
+      100) /
+      100 +
     FONT_MIN
+
+  // `list.js:selectIndex` kept one `li.item` selected and scrolled it into view. The grid
+  // index, not a DOM class, is the source of truth; `Poster` renders `.selected` from it.
+  const [selected, setSelected] = useState<number | null>(null)
 
   // `list.js:addloadmore` hid the row unless a full page came back, because a provider that
   // claimed `hasMore` with nothing new would loop. Pages differ in size (TMDB returns 20,
   // the torrent lists 50), so any non-empty page with more to come keeps the row.
   const showLoadMore = hasMore && items.length > 0
+
+  // A new tab resets the collection below the old index; drop the stale selection.
+  useEffect(() => {
+    setSelected((current) => (current !== null && current >= items.length ? null : current))
+  }, [items.length])
+
+  const columnCount = useCallback((): number => {
+    return computeColumns(scrollRef.current?.clientWidth ?? 0, posterWidth)
+  }, [posterWidth])
+
+  const selectAt = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= items.length) return
+      setSelected(index)
+      scrollRef.current?.querySelectorAll<HTMLElement>('li.item')[index]?.scrollIntoView({
+        block: 'nearest',
+      })
+    },
+    [items.length],
+  )
+
+  // `list.js:moveUp/moveDown/moveLeft/moveRight`: with nothing selected any arrow picks the
+  // first poster; otherwise the index moves and out-of-range moves are no-ops.
+  const move = useCallback(
+    (delta: number) => {
+      if (selected === null) {
+        selectAt(0)
+        return
+      }
+      selectAt(selected + delta)
+    },
+    [selected, selectAt],
+  )
+
+  const openAt = useCallback(
+    (index: number | null) => {
+      const item = index === null ? undefined : items[index]
+      if (item !== undefined) navigate(`/detail/${item.imdb_id}`)
+    },
+    [items, navigate],
+  )
+
+  // The keys `list.js:initKeyboardShortcuts` bound on the browse list: arrows select,
+  // enter/space opens, f toggles the bookmark and w the watched state of the selection.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      if (event.ctrlKey || event.metaKey) {
+        if (event.key === '+' || event.key === '=') {
+          event.preventDefault()
+          onResizePoster?.(1)
+        } else if (event.key === '-' || event.key === '_') {
+          event.preventDefault()
+          onResizePoster?.(-1)
+        }
+        return
+      }
+      if (event.altKey) return
+      const selectedItem = selected === null ? undefined : items[selected]
+      switch (event.key) {
+        case 'ArrowUp':
+          event.preventDefault()
+          move(-columnCount())
+          break
+        case 'ArrowDown':
+          event.preventDefault()
+          move(columnCount())
+          break
+        case 'ArrowLeft':
+          event.preventDefault()
+          move(-1)
+          break
+        case 'ArrowRight':
+          event.preventDefault()
+          move(1)
+          break
+        case 'Enter':
+        case ' ':
+          // A focused button, link or the load-more row owns its own activation.
+          if (target instanceof HTMLElement && target.closest('button, a, [role="button"]')) return
+          event.preventDefault()
+          openAt(selected)
+          break
+        case 'f':
+        case 'F':
+          if (selectedItem !== undefined) onToggleBookmark?.(selectedItem)
+          break
+        case 'w':
+        case 'W':
+          // `item.js:setCoverStates` removed the watched icon for shows, so w only applies to movies.
+          if (selectedItem?.type === 'movie')
+            onToggleWatched?.(selectedItem, library.get(selectedItem.imdb_id)?.watched ?? false)
+          break
+        default:
+          break
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [
+    items,
+    selected,
+    library,
+    move,
+    columnCount,
+    openAt,
+    onToggleBookmark,
+    onToggleWatched,
+    onResizePoster,
+  ])
+
+  // `list.js:initPosterResizeKeys`: Alt+wheel resized the posters. Bound natively so the
+  // browser's default zoom is cancelled (React's wheel listener is passive).
+  useEffect(() => {
+    const element = scrollRef.current
+    if (element === null || onResizePoster === undefined) return
+    const onWheel = (event: WheelEvent) => {
+      if (!event.altKey) return
+      event.preventDefault()
+      onResizePoster(event.deltaY < 0 ? 1 : -1)
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [onResizePoster])
 
   useEffect(() => {
     const style = document.createElement('style')
@@ -104,13 +250,14 @@ export function PosterGrid({
     <div className="list">
       {/* The legacy stylesheet makes the inner `ul.items` the scroller, not `.list`. */}
       <ul className={`items ${container}`} ref={scrollRef} onScroll={onScroll}>
-        {items.map((item) => (
+        {items.map((item, index) => (
           <Poster
             key={item.imdb_id}
             item={item}
             width={posterWidth}
             height={posterHeight}
             showRating={showRating}
+            selected={index === selected}
             state={library.get(item.imdb_id) ?? { bookmarked: false, watched: false }}
             onOpen={(opened) => navigate(`/detail/${opened.imdb_id}`)}
             {...(onToggleBookmark === undefined ? {} : { onToggleBookmark })}
