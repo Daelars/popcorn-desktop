@@ -95,6 +95,8 @@ function stubBridge(
     settings?: Record<string, unknown>
     players?: unknown
     captureProgress?: (listener: (payload: unknown) => void) => void
+    captureState?: (listener: (payload: unknown) => void) => void
+    streamStart?: () => Promise<unknown>
   } = {},
 ) {
   const calls: Array<{ channel: string; payload: unknown }> = []
@@ -103,12 +105,14 @@ function stubBridge(
       calls.push({ channel, payload })
       switch (channel) {
         case 'stream:start':
-          return {
-            id: 'session-1',
-            infoHash: 'hash-1',
-            port: 41000,
-            url: 'http://127.0.0.1:41000/0',
-          }
+          return options.streamStart === undefined
+            ? {
+                id: 'session-1',
+                infoHash: 'hash-1',
+                port: 41000,
+                url: 'http://127.0.0.1:41000/0',
+              }
+            : options.streamStart()
         case 'media:getShow':
           return options.show
         case 'settings:all':
@@ -133,6 +137,10 @@ function stubBridge(
     },
     onProgress: (listener: (payload: unknown) => void) => {
       options.captureProgress?.(listener)
+      return () => undefined
+    },
+    onState: (listener: (payload: unknown) => void) => {
+      options.captureState?.(listener)
       return () => undefined
     },
   } as unknown as PopcornBridge
@@ -169,6 +177,57 @@ it('starts the stream and renders the legacy player markup', async () => {
   expect(screen.getAllByText(title).length).toBeGreaterThan(0)
   const start = calls.find((call) => call.channel === 'stream:start')
   expect(start?.payload).toMatchObject({ torrentId: source, fileIndex: 0 })
+})
+
+it('drives the loading screen from the session state stream', async () => {
+  let pushState: ((state: unknown) => void) | undefined
+  let resolveStart: ((value: unknown) => void) | undefined
+  stubBridge({
+    captureState: (listener) => (pushState = listener),
+    streamStart: () =>
+      new Promise((resolve) => {
+        resolveStart = resolve
+      }),
+  })
+  renderPlayer()
+
+  await waitFor(() => {
+    expect(document.querySelector('.loading')).not.toBeNull()
+  })
+  expect(screen.getByText('Connecting')).toBeInTheDocument()
+
+  act(() => {
+    pushState?.({
+      id: 'session-1',
+      infoHash: 'hash-1',
+      state: 'downloading',
+      url: '',
+      port: 41000,
+      downloaded: 5,
+      uploaded: 0,
+      speed: 1024,
+      uploadSpeed: 0,
+      peers: 1,
+      progress: 0.5,
+      length: 10,
+      timeRemaining: 0,
+    })
+  })
+  await waitFor(() => {
+    expect(screen.getByText('Downloading')).toBeInTheDocument()
+  })
+
+  act(() => {
+    resolveStart?.({
+      id: 'session-1',
+      infoHash: 'hash-1',
+      port: 41000,
+      url: 'http://127.0.0.1:41000/0',
+    })
+  })
+  await waitFor(() => {
+    expect(document.querySelector('.player')).not.toBeNull()
+  })
 })
 
 it('shows upload speed, not the uploaded total, in the player stats', async () => {
