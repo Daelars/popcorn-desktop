@@ -9,6 +9,7 @@ import {
   MOVIE_TRANSPARENCY,
   type NumberRow,
   type OptionSource,
+  type PasswordRow,
   SERIES_TRANSPARENCY,
   SETTINGS_LAYOUT,
   type SelectRow,
@@ -194,6 +195,7 @@ function TextField({
   size,
   readOnly,
   placeholder,
+  type = 'text',
 }: {
   settingKey: SettingsKey
   label?: string
@@ -201,6 +203,7 @@ function TextField({
   size?: number
   readOnly?: boolean
   placeholder?: string
+  type?: 'text' | 'password'
 }) {
   const { t } = useTranslation()
   const settings = useSettings().data
@@ -210,7 +213,7 @@ function TextField({
       {label === undefined ? null : <p>{t(label)}</p>}
       <input
         id={settingKey}
-        type="text"
+        type={type}
         name={settingKey}
         size={size}
         aria-label={label === undefined ? undefined : t(label)}
@@ -313,6 +316,107 @@ function Row({
       )}
       {restart === true ? <em>&nbsp;&nbsp;&nbsp;{t('Please restart your application')}</em> : null}
     </span>
+  )
+}
+
+/**
+ * The legacy `.opensubtitles-options` block. While signed out it renders the credential fields
+ * and the connect/create links; while signed in, the connected note and the disconnect link.
+ * The credentials are written through the shared settings save path (`settings:set`).
+ */
+function OpenSubtitlesAuth({
+  fields,
+  update,
+}: {
+  fields: ReadonlyArray<TextRow | PasswordRow>
+  update: Update
+}) {
+  const { t } = useTranslation()
+  const settings = useSettings().data
+  const authenticated = settings?.opensubtitlesAuthenticated === true
+  return (
+    <div className="opensubtitles-options">
+      {authenticated ? (
+        <span>
+          <em>
+            * {t('You are currently connected to {{0}}', { 0: 'OpenSubtitles.org' })}.{' '}
+            <button
+              type="button"
+              id="unauthOpensubtitles"
+              className="unauthtext"
+              onClick={() => {
+                update('opensubtitlesUsername', '')
+                update('opensubtitlesPassword', '')
+                update('opensubtitlesAuthenticated', false)
+              }}
+            >
+              {t('Disconnect account')}
+            </button>
+          </em>
+        </span>
+      ) : (
+        <>
+          {fields.map((field) => {
+            const current = settings?.[field.key]
+            const label = t(labelFor(field.key, field.label))
+            return (
+              <span key={field.key}>
+                <p>{label}</p>
+                <input
+                  id={field.key}
+                  name={field.key}
+                  type={field.kind === 'password' ? 'password' : 'text'}
+                  size={field.size}
+                  aria-label={label}
+                  placeholder={
+                    field.kind === 'password' && field.placeholder !== undefined
+                      ? t(field.placeholder)
+                      : undefined
+                  }
+                  value={typeof current === 'string' ? current : ''}
+                  onChange={(event) => update(field.key, event.target.value)}
+                />
+                {field.kind === 'text' ? (
+                  <>
+                    <div className="loading-spinner" style={{ display: 'none' }} />
+                    <div className="valid-tick" style={{ display: 'none' }} />
+                    <div className="invalid-cross" style={{ display: 'none' }} />
+                  </>
+                ) : (
+                  <br />
+                )}
+              </span>
+            )
+          })}
+          <span>
+            <em>
+              *{' '}
+              <button
+                type="button"
+                className="syncOpensubtitles"
+                id="authOpensubtitles"
+                onClick={() => update('opensubtitlesAuthenticated', true)}
+              >
+                {t('Connect to {{0}}', { 0: 'OpenSubtitles.org' })}
+              </button>{' '}
+              {t('to automatically fetch subtitles for movies and episodes you watch in {{0}}', {
+                0: settings?.projectName ?? '',
+              })}
+              &nbsp;&nbsp;(
+              <a
+                className="createOpensubtitles"
+                href="https://www.opensubtitles.org/newuser"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t('Create an account')}
+              </a>
+              )
+            </em>
+          </span>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -458,6 +562,19 @@ export function SettingsPage() {
     </Row>
   )
 
+  const renderPassword = (row: PasswordRow) => (
+    <Row restart={SETTINGS_METADATA[row.key].apply === 'restart'}>
+      <TextField
+        settingKey={row.key}
+        label={labelFor(row.key, row.label)}
+        update={update}
+        type="password"
+        {...(row.size === undefined ? {} : { size: row.size })}
+        {...(row.placeholder === undefined ? {} : { placeholder: row.placeholder })}
+      />
+    </Row>
+  )
+
   const renderRow = (row: SettingRow) => {
     switch (row.kind) {
       case 'checkbox':
@@ -466,6 +583,8 @@ export function SettingsPage() {
         return renderSelect(row)
       case 'text':
         return renderText(row)
+      case 'password':
+        return renderPassword(row)
       case 'number':
         return renderNumber(row)
       case 'colour':
@@ -590,6 +709,8 @@ export function SettingsPage() {
             />
           </Row>
         )
+      case 'opensubtitles':
+        return <OpenSubtitlesAuth fields={row.fields} update={update} />
     }
   }
 
