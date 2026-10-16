@@ -168,8 +168,12 @@ export const nyaaProvider: SearchProvider = {
 }
 
 /**
- * The providers the app can actually reach. The legacy table also listed 1337x,
- * solidtorrents and torrentgalaxy; those now answer 403, time out, or no longer resolve.
+ * The providers the app can actually reach. The legacy table also listed 1337x, SolidTorrents
+ * and TorrentGalaxy; probing each (Oct 2026) found none usable — 1337x.to answers 403
+ * (Cloudflare), solidtorrents.to redirects to bitsearch whose API returns 500/520, and
+ * torrentgalaxy.to no longer resolves (the .one mirror's search redirects to its homepage and
+ * exposes no magnets). Porting them would mean swapping in a different source, which is out of
+ * scope, so they stay out until a maintainer approves replacements.
  */
 export const SEARCH_PROVIDERS: ReadonlyArray<SearchProvider> = [pirateBayProvider, nyaaProvider]
 
