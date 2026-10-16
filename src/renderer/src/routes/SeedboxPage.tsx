@@ -2,8 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, HardDrive, Pause, Play, Trash2, Upload } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router'
 import type { IpcResponse } from '../../../shared/ipc'
 import { popcorn } from '../bridge'
+import { failureText } from '../failure'
+import { notify } from '../notify'
 
 type TorrentSummary = IpcResponse<'torrents:list'>[number]
 
@@ -18,6 +21,7 @@ function formatSize(bytes: number): string {
 export function SeedboxPage() {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const navigate = useNavigate()
   const [selected, setSelected] = useState<string>()
 
   const torrents = useQuery({
@@ -48,6 +52,38 @@ export function SeedboxPage() {
   const current = list.find((torrent) => torrent.infoHash === selected) ?? list[0]
   const percent = current === undefined ? 0 : Math.round(current.progress * 100)
 
+  // The seedbox totals across every live torrent; the settings page's persisted
+  // `totalDownloaded`/`totalUploaded` counters are inert, so the ratio is derived here instead.
+  const totalDownloaded = list.reduce((sum, torrent) => sum + torrent.downloaded, 0)
+  const totalUploaded = list.reduce((sum, torrent) => sum + torrent.uploaded, 0)
+  const ratio = totalDownloaded > 0 ? (totalUploaded / totalDownloaded).toFixed(2) : t('None')
+
+  /** `seedbox.js:addItem`: watch one file of the current torrent. */
+  const playFile = (torrent: TorrentSummary, fileIndex: number) => {
+    const query = new URLSearchParams({
+      source: torrent.infoHash,
+      file: String(fileIndex),
+      title: torrent.name,
+    })
+    navigate(`/player?${query.toString()}`)
+  }
+
+  /** `seedbox.js:addItem` in download-only mode: select one file and leave it in the seedbox. */
+  const downloadFile = useMutation({
+    mutationFn: async ({ infoHash, fileIndex }: { infoHash: string; fileIndex: number }) => {
+      await popcorn().invoke('stream:start', {
+        torrentId: infoHash,
+        fileIndex,
+        origin: window.location.origin,
+      })
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['torrents'] })
+      notify(t('Download added'))
+    },
+    onError: (error: unknown) => notify(failureText(error)),
+  })
+
   return (
     <div className="seedbox-container">
       <div className="spinner" style={torrents.isPending ? { display: 'block' } : undefined}>
@@ -61,6 +97,19 @@ export function SeedboxPage() {
         <div className="seedbox-details">
           <div className="seedbox-torrents">
             <div className="seedbox-torrent-title">{t('Download list')}</div>
+            {list.length === 0 ? null : (
+              <div className="seedbox-totals">
+                <span className="watched">
+                  <Download size={14} aria-hidden /> {formatSize(totalDownloaded)}
+                </span>
+                <span className="watched">
+                  <Upload size={14} aria-hidden /> {formatSize(totalUploaded)}
+                </span>
+                <span className="watched">
+                  {t('Overall Ratio')}: {ratio}
+                </span>
+              </div>
+            )}
             {list.length === 0 && !torrents.isPending ? (
               <div className="notorrents-info">
                 <div className="notorrents-frame">
@@ -147,6 +196,29 @@ export function SeedboxPage() {
                       {current.files.map((file) => (
                         <li key={file.index} className="file-item">
                           <span className="file-name">{file.name}</span>
+                          <button
+                            type="button"
+                            className="item-play"
+                            aria-label={t('Watch Now')}
+                            title={t('Watch Now')}
+                            onClick={() => playFile(current, file.index)}
+                          >
+                            <Play size={14} aria-hidden />
+                          </button>
+                          <button
+                            type="button"
+                            className="item-download"
+                            aria-label={t('Download')}
+                            title={t('Download')}
+                            onClick={() =>
+                              downloadFile.mutate({
+                                infoHash: current.infoHash,
+                                fileIndex: file.index,
+                              })
+                            }
+                          >
+                            <Download size={14} aria-hidden />
+                          </button>
                           <span className="filesize">{formatSize(file.length)}</span>
                         </li>
                       ))}
