@@ -1,6 +1,6 @@
 module.exports = {
-  localesPath: 'src/app/language',
-  srcPath: 'src/app',
+  localesPath: 'legacy/language',
+  srcPath: 'legacy',
   srcExtensions: ['js', 'tpl'],
   flatTranslations: true
 };

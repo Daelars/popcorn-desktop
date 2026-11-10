@@ -1,6 +1,6 @@
 # Port plan: architecture deepening and correctness (Phases 7–13)
 
-This plan follows `plan.md` (Phases 0–6). Phases 0–6 moved Popcorn Time from NW.js/Backbone (`src/app`) to Electron + TypeScript + Effect + React (`src/main`, `src/preload`, `src/shared`, `src/renderer`). An audit on 22–23 Sep 2026 found that the port has the right shape but misses intent in several places:
+This plan follows `plan.md` (Phases 0–6). Phases 0–6 moved Popcorn Time from NW.js/Backbone (`legacy/`) to Electron + TypeScript + Effect + React (`src/main`, `src/preload`, `src/shared`, `src/renderer`). An audit on 22–23 Sep 2026 found that the port has the right shape but misses intent in several places:
 
 - Startup order bugs.
 - An IPC seam that is only typed on one side.
@@ -93,7 +93,7 @@ Each was checked twice against the code. Line numbers are as of 23 Sep 2026.
 - **Playback.**
   - The renderer picks files, runs the subtitle flow and uses the loopback port as the session id.
   - `TorrentService` fails the deletion test: it's a pass-through between `StreamManager` and the engine.
-  - The legacy loading state machine (`src/app/streamer.js:660-710`: connecting → startingDownload → downloading → waitingForSubtitles → ready | playingExternally) is gone.
+  - The legacy loading state machine (`legacy/streamer.js:660-710`: connecting → startingDownload → downloading → waitingForSubtitles → ready | playingExternally) is gone.
 - **Settings.** Each key lives in four places: the type in `shared/settings.ts`, the default in `main/settings.ts`, side effects in `main/ipc.ts`, and label, options and conditions in `renderer/routes/SettingsPage.tsx` (1,005 lines). Consumers read a snapshot at boot. About 55 of 130 keys have no reader.
 - **Providers.**
   - The renderer decides capabilities by display name (`descriptor.name === 'YTSApi'`).
@@ -264,7 +264,7 @@ Phase 7 tickets have no blockers and can run in parallel. After Phase 8, the pla
 ## 5. Risks and decisions for the maintainers
 
 - **User data.** 7.1 and #26 come before anything that touches migration. A wrong path loses history silently, and the migration writes a backup but reports no error.
-- **Legacy behaviour drift.** Refactors must keep legacy semantics unless the ticket says otherwise. The legacy code is in `src/app`, and each ticket cites the file to compare against.
+- **Legacy behaviour drift.** Refactors must keep legacy semantics unless the ticket says otherwise. The legacy code is in `legacy/`, and each ticket cites the file to compare against.
 - **video.js 8 (12.3)** changes the skin. The visual gate (#16) should run before it merges.
 - **Speculative work.** 11.2 (Library) and all of Phase 13 carry `needs-triage`. A maintainer decides scope before an agent picks them up.
 - **Test files.** Most tickets can extend existing files (`tests/ipc.test.ts`, `streams.test.ts`, `settings.test.ts`, `providers.test.ts`, `migration.test.ts`, `PlayerPage.test.tsx`). Where a new module arguably deserves its own file (StreamSession, Playback rules, Catalog), the ticket asks for approval first, as `AGENTS.md` requires.

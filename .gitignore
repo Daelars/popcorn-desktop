@@ -2,9 +2,9 @@
 node_modules/
 out/
 release/
-src/app/themes
+legacy/themes
 cache/
-src/app/css/app.css
+legacy/css/app.css
 *git.json
 
 # temp files
@@ -32,3 +32,9 @@ lib-cov
 *.pid
 *.gz
 *.iml
+
+# refactor monitor loop state
+.refactor-monitor/
+
+# local agent skills and checkouts
+.agents/
