@@ -1,4 +1,4 @@
-import { Effect } from 'effect'
+import { Context, Effect, Layer } from 'effect'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateStatus } from '../shared/ipc'
 
@@ -90,3 +90,11 @@ export function createUpdates(
     install: () => Effect.sync(() => port?.quitAndInstall()),
   }
 }
+
+export class UpdatesService extends Context.Tag('UpdatesService')<UpdatesService, UpdatesShape>() {}
+
+/** The updater as a Layer; the port and the event publisher are supplied by the root. */
+export const UpdatesServiceLive = (
+  port: UpdatePort | undefined,
+  publish: (status: UpdateStatus) => void,
+) => Layer.succeed(UpdatesService, createUpdates(port, publish))

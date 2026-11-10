@@ -1,11 +1,7 @@
 import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
-import {
-  DatabaseService,
-  DatabaseServiceLive,
-  SqliteLive,
-  SqliteSettingsStoreLive,
-} from '../src/main/database'
+import { DatabaseServiceLive, SqliteLive, SqliteSettingsStoreLive } from '../src/main/database'
+import { FilePickerService } from '../src/main/file-picker'
 import {
   createEventPublisher,
   type ExternalPlayersPort,
@@ -13,13 +9,15 @@ import {
   registerIpc,
 } from '../src/main/ipc'
 import { LegacyMigration } from '../src/main/legacy-migration'
+import { LocalFiles } from '../src/main/localfiles'
 import { NOT_MIGRATED } from '../src/main/migration'
-import { playerArgs, playerCommand } from '../src/main/players'
-import {
-  type SettingsEnvironment,
-  SettingsService,
-  SettingsServiceLive,
-} from '../src/main/settings'
+import { PlayersService, playerArgs, playerCommand } from '../src/main/players'
+import { ProvidersService } from '../src/main/providers/registry'
+import { SearchService } from '../src/main/search'
+import { type SettingsEnvironment, SettingsServiceLive } from '../src/main/settings'
+import { StreamManager } from '../src/main/streams'
+import { UpdatesService } from '../src/main/updates'
+import { WindowService } from '../src/main/window'
 import type { IpcEnvelope } from '../src/shared/ipc'
 
 const environment: SettingsEnvironment = {
@@ -54,25 +52,23 @@ async function harness() {
     Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
   )
   const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
-  const runtime = ManagedRuntime.make(Layer.mergeAll(settings, database, sqlite))
   const launched: Array<{ playerId: string; url: string; title?: string }> = []
 
-  const services = {
-    settings: await runtime.runPromise(SettingsService),
-    database: await runtime.runPromise(DatabaseService),
-    providers: [],
-    window: {
+  // One test Layer supplies every service the IPC handlers read from the context.
+  const fakes = Layer.mergeAll(
+    Layer.succeed(ProvidersService, []),
+    Layer.succeed(WindowService, {
       minimize: () => Effect.void,
       maximize: () => Effect.void,
       close: () => Effect.void,
       setZoom: () => Effect.void,
       setSize: () => Effect.void,
-    },
-    files: {
+    }),
+    Layer.succeed(FilePickerService, {
       pickTorrent: () => Effect.succeed(undefined),
       openDirectory: () => Effect.void,
-    },
-    search: {
+    }),
+    Layer.succeed(SearchService, {
       search: (query: string) =>
         Effect.succeed({
           results: [
@@ -89,15 +85,15 @@ async function harness() {
           counts: { nyaa: 1 },
           failures: [],
         }),
-    },
-    players: {
+    }),
+    Layer.succeed(PlayersService, {
       list: () => Effect.succeed([{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }]),
       play: (request: Parameters<ExternalPlayersPort['play']>[0]) => {
         launched.push(request)
         return Effect.void
       },
-    },
-    stream: {
+    }),
+    Layer.succeed(StreamManager, {
       start: () =>
         Effect.succeed({ infoHash: 'hash-1', port: 41000, url: 'http://127.0.0.1:41000/0' }),
       stopSession: () => Effect.void,
@@ -113,22 +109,23 @@ async function harness() {
       pause: () => Effect.void,
       resume: () => Effect.void,
       progress: Stream.empty,
-    },
-    local: {
+    }),
+    Layer.succeed(LocalFiles, {
       serve: (path: string) =>
         Effect.succeed({ port: 41000, url: 'http://127.0.0.1:41000/0', name: path }),
       stop: () => Effect.void,
       subtitle: () => Effect.succeed({ port: 41001, url: 'http://127.0.0.1:41001/subtitles.vtt' }),
       serveVtt: () => Effect.succeed({ port: 41001, url: 'http://127.0.0.1:41001/subtitles.vtt' }),
-    },
-    updates: {
+    }),
+    Layer.succeed(UpdatesService, {
       check: () => Effect.void,
       download: () => Effect.void,
       install: () => Effect.void,
-    },
-  }
+    }),
+  )
+  const runtime = ManagedRuntime.make(Layer.mergeAll(settings, database, sqlite, fakes))
   const ipc = fakeIpcMain()
-  registerIpc(ipc.port, services, runtime)
+  registerIpc(ipc.port, runtime)
   return { runtime, invoke: ipc.invoke, launched }
 }
 

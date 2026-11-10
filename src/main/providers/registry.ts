@@ -1,4 +1,6 @@
-﻿import type { Movie, Provider, Show } from '../../shared'
+﻿import { Context, Effect, Layer } from 'effect'
+import type { Movie, Provider, Show } from '../../shared'
+import { SettingsService } from '../settings'
 import { ANIME_API_CONFIG, AnimeApi } from './anime'
 import type { BaseProvider } from './base'
 import { MOVIE_API_CONFIG, MovieApi } from './movie'
@@ -106,3 +108,57 @@ export function createRegistry(options: RegistryOptions): ReadonlyArray<Provider
 
   return entries
 }
+
+export class ProvidersService extends Context.Tag('ProvidersService')<
+  ProvidersService,
+  ReadonlyArray<ProviderEntry>
+>() {}
+
+/** A non-empty environment override for a provider's API base URL. */
+function envOverride(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === '' ? undefined : value.trim()
+}
+
+/** The first URL of a legacy comma-separated `custom*Server` setting. */
+function firstServer(value: string): string | undefined {
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .find((part) => part !== '')
+}
+
+/**
+ * Builds the registry from settings, with the `POPCORN_*_API` environment variables kept as
+ * development overrides. A `custom*Server` setting wins when set, as it did in the legacy app.
+ */
+export const ProvidersServiceLive = Layer.effect(
+  ProvidersService,
+  Effect.gen(function* () {
+    const settings = yield* SettingsService
+    const snapshot = yield* settings.snapshot
+    const language = snapshot.language === '' ? 'en' : snapshot.language
+
+    const apiUrls: Partial<Record<ProviderId, string>> = {}
+    const movies =
+      firstServer(snapshot.customMoviesServer) ?? envOverride(process.env.POPCORN_MOVIES_API)
+    const series =
+      firstServer(snapshot.customSeriesServer) ?? envOverride(process.env.POPCORN_TV_API)
+    const anime =
+      firstServer(snapshot.customAnimeServer) ?? envOverride(process.env.POPCORN_ANIME_API)
+    const yts = envOverride(process.env.POPCORN_YTS_API)
+    if (movies !== undefined) apiUrls.movies = movies
+    if (yts !== undefined) apiUrls.yts = yts
+    if (series !== undefined) apiUrls.tv = series
+    if (anime !== undefined) apiUrls.anime = anime
+
+    return ProvidersService.of(
+      createRegistry({
+        apiUrls,
+        tmdbKey: snapshot.tmdb.api_key,
+        language,
+        contentLanguage: snapshot.contentLanguage === '' ? language : snapshot.contentLanguage,
+        contentLangOnly: snapshot.contentLangOnly,
+      }),
+    )
+  }),
+)

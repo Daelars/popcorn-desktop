@@ -1,6 +1,7 @@
-import { Duration, Effect } from 'effect'
+import { Context, Duration, Effect, Layer } from 'effect'
 import { ProviderError } from '../shared/errors'
 import type { SettingsKey } from '../shared/settings'
+import { SettingsService } from './settings'
 
 /** One torrent from an online search, normalised across providers. */
 export interface TorrentResult {
@@ -171,6 +172,41 @@ export const nyaaProvider: SearchProvider = {
  * solidtorrents and torrentgalaxy; those now answer 403, time out, or no longer resolve.
  */
 export const SEARCH_PROVIDERS: ReadonlyArray<SearchProvider> = [pirateBayProvider, nyaaProvider]
+
+/** Online torrent search across the providers the settings enable. */
+export interface SearchServiceShape {
+  readonly search: (query: string, category: string) => Effect.Effect<SearchOutcome>
+}
+
+export class SearchService extends Context.Tag('SearchService')<
+  SearchService,
+  SearchServiceShape
+>() {}
+
+export const SearchServiceLive = Layer.effect(
+  SearchService,
+  Effect.gen(function* () {
+    const settings = yield* SettingsService
+    return SearchService.of({
+      search: (query, category) =>
+        Effect.gen(function* () {
+          const enabledKeys = yield* Effect.forEach(
+            SEARCH_PROVIDERS,
+            (provider) =>
+              Effect.map(settings.get(provider.setting), (value) => [provider.id, value] as const),
+            { concurrency: 'unbounded' },
+          )
+          const enabled = new Map(enabledKeys)
+          return yield* searchTorrents(
+            SEARCH_PROVIDERS,
+            (provider) => enabled.get(provider.id) !== false,
+            query,
+            category,
+          )
+        }),
+    })
+  }),
+)
 
 function infoHashOf(magnet: string): string {
   const match = /btih:([0-9a-z]+)/i.exec(magnet)

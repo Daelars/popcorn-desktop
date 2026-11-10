@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { basename, delimiter, join } from 'node:path'
-import { Effect } from 'effect'
+import { Context, Effect, Layer } from 'effect'
 
 /**
  * The legacy external-player table, ported verbatim: switches, the BSPlayer argument
@@ -279,3 +279,48 @@ export function launchPlayer(
 
 /** The names the legacy app listed in its player chooser. */
 export const externalPlayerNames: ReadonlyArray<string> = Object.keys(EXTERNAL_PLAYERS)
+
+/** External players found on disk and the launcher that starts them. */
+export interface PlayersShape {
+  readonly list: () => Effect.Effect<ReadonlyArray<ExternalPlayer>>
+  readonly play: (request: {
+    readonly playerId: string
+    readonly url: string
+    readonly subtitle?: string
+    readonly title?: string
+    readonly fullscreen?: boolean
+  }) => Effect.Effect<void>
+}
+
+export class PlayersService extends Context.Tag('PlayersService')<PlayersService, PlayersShape>() {}
+
+export interface PlayersEnvironment {
+  readonly platform: NodeJS.Platform
+  readonly environment: Record<string, string | undefined>
+}
+
+/** Scans the platform's search paths once, then serves the found players and starts them. */
+export const PlayersServiceLive = (environment: PlayersEnvironment) =>
+  Layer.effect(
+    PlayersService,
+    Effect.map(
+      scanPlayers(playerSearchPaths(environment.platform, environment.environment)),
+      (players) =>
+        PlayersService.of({
+          list: () => Effect.succeed(players),
+          play: (request) =>
+            Effect.gen(function* () {
+              const player = players.find((candidate) => candidate.id === request.playerId)
+              if (player === undefined) return
+              const args = playerArgs(player, {
+                url: request.url,
+                ...(request.subtitle === undefined ? {} : { subtitle: request.subtitle }),
+                ...(request.title === undefined ? {} : { title: request.title }),
+                fullscreen: request.fullscreen === true,
+                utf8Subtitle: true,
+              })
+              yield* launchPlayer(player, args)
+            }),
+        }),
+    ),
+  )
