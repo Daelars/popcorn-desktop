@@ -483,7 +483,7 @@ export const SETTINGS_METADATA: { readonly [K in SettingsKey]: SettingMetadata }
   }),
   opensubtitlesPassword: meta({
     label: 'Opensubtitles Password',
-    control: 'text',
+    control: 'password',
     section: 'subtitles',
     consumers: ['main:SubtitlesService'],
   }),

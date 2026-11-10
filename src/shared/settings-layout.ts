@@ -56,6 +56,14 @@ export interface TextRow extends RowBase {
   readonly folder?: 'cache' | 'downloads' | 'database'
 }
 
+/** A masked text field, e.g. the OpenSubtitles password. */
+export interface PasswordRow extends RowBase {
+  readonly kind: 'password'
+  readonly label?: string
+  readonly size?: number
+  readonly placeholder?: string
+}
+
 export interface NumberRow extends RowBase {
   readonly kind: 'number'
   readonly label?: string
@@ -99,10 +107,21 @@ export interface ContentLanguageRow {
   readonly kind: 'contentLanguage'
 }
 
+/**
+ * The legacy `.opensubtitles-options` block: the credential fields while signed out, or the
+ * connected note while signed in. The fields are data so their labels come from the metadata;
+ * the block itself is bespoke because its markup has no generic row.
+ */
+export interface OpenSubtitlesRow {
+  readonly kind: 'opensubtitles'
+  readonly fields: ReadonlyArray<TextRow | PasswordRow>
+}
+
 export type SettingRow =
   | CheckboxRow
   | SelectRow
   | TextRow
+  | PasswordRow
   | NumberRow
   | ColourRow
   | TabsRow
@@ -111,6 +130,7 @@ export type SettingRow =
   | RatioRow
   | PreloadRow
   | ContentLanguageRow
+  | OpenSubtitlesRow
 
 export interface SettingSectionSpec {
   readonly id: string
@@ -357,6 +377,19 @@ export const SETTINGS_LAYOUT: ReadonlyArray<SettingSectionSpec> = [
     id: 'subtitles',
     title: 'Subtitles',
     rows: [
+      {
+        kind: 'opensubtitles',
+        fields: [
+          { kind: 'text', key: 'opensubtitlesUsername', label: 'Username', size: 50 },
+          {
+            kind: 'password',
+            key: 'opensubtitlesPassword',
+            label: 'Password',
+            size: 50,
+            placeholder: '* Stored in local database as encrypted MD5 hash',
+          },
+        ],
+      },
       {
         kind: 'select',
         key: 'subtitle_language',
