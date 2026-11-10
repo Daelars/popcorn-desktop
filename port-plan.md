@@ -287,6 +287,22 @@ against an open ticket, which removes the control when the feature lands.
 | `multipleExtSubtitles`, `opensubtitlesAuthenticated`, `alwaysFullscreen`, `preloadNextEpisodeTime`, `activateLoCtrl`, `audioPassthrough` | Player controls parity — #59 |
 | `postersMinWidth`, `postersMaxWidth`, `postersMinFontSize`, `postersMaxFontSize`, `postersJump`, `watchedCovers`, `tv_detail_jump_to`, `ratingStars`, `showAdvancedSettings`, `alwaysShowBookmarks` | Visual/UI parity — #59 (13.4) |
 
+#### DHT (10.3 live-apply decision)
+
+`maxUdpReqLimit` (DHT concurrency) is applied when the engine is built, not live. WebTorrent
+creates its `bittorrent-dht` client once in the constructor (`dht: { concurrency }`) and exposes no
+public setter for it; the legacy app only re-tuned it at load (`database.js` set
+`client.dht._rpc.concurrency` on boot, and the settings UI's `maxUdpReqLimit` case just showed a
+success toast). We deliberately leave it as a constructor option rather than reach into the private
+`_rpc` field, which is not part of webtorrent's API and can change between releases. A DHT
+concurrency change therefore takes effect on the next restart, matching legacy behaviour. The
+live-apply subscription covers only `connectionLimit`, `downloadLimit`, `uploadLimit` and
+`maxLimitMult`, the keys webtorrent accepts on a running client.
+
+`dhtEnable` is unrelated to the BitTorrent DHT: it gates the legacy "Automatically update the API
+Server URLs" feature and has no consumer in the port. It stays inert under torrent/seedbox parity
+(#57).
+
 
 ## Decisions so far
 

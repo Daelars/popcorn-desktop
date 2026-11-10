@@ -1,9 +1,9 @@
-import { Effect, Layer, Stream } from 'effect'
+import { Effect, Layer, type Scope, Stream } from 'effect'
 import type WebTorrent from 'webtorrent'
 import type { WebTorrentTorrent } from 'webtorrent'
 import { TorrentError } from '../shared/errors'
 import type { Settings } from '../shared/settings'
-import { DEFAULT_TRACKERS, SettingsService } from './settings'
+import { DEFAULT_TRACKERS, SettingsService, type SettingsServiceShape } from './settings'
 import {
   TorrentEngine,
   type TorrentHandle,
@@ -205,6 +205,48 @@ export function liveLimits(snapshot: Settings): LiveLimits {
   }
 }
 
+/** The runtime-tunable surface of a webtorrent client: exactly what live apply writes. */
+export interface LiveLimitClient {
+  maxConns: number
+  throttleDownload: (rate: number) => void
+  throttleUpload: (rate: number) => void
+}
+
+/** The keys webtorrent accepts while it runs; everything else needs a restart. */
+const LIVE_LIMIT_KEYS: ReadonlySet<string> = new Set([
+  'connectionLimit',
+  'downloadLimit',
+  'uploadLimit',
+  'maxLimitMult',
+])
+
+/**
+ * Applies connection and speed limit changes to a running client for the life of the scope.
+ * The subscription is forked, so calling this once at engine startup is enough; the effect
+ * finishes when the scope closes. DHT concurrency and protocol encryption are webtorrent
+ * constructor options and are deliberately not re-applied here.
+ */
+export function subscribeLiveLimits(
+  settings: SettingsServiceShape,
+  client: LiveLimitClient,
+): Effect.Effect<void, never, Scope.Scope> {
+  return settings.changes.pipe(
+    Stream.runForEach((change) =>
+      LIVE_LIMIT_KEYS.has(change.key)
+        ? Effect.gen(function* () {
+            const current = yield* settings.snapshot
+            const limits = liveLimits(current)
+            client.maxConns = limits.maxConns
+            client.throttleDownload(limits.downloadLimit)
+            client.throttleUpload(limits.uploadLimit)
+          })
+        : Effect.void,
+    ),
+    Effect.forkScoped,
+    Effect.asVoid,
+  )
+}
+
 /**
  * Real engine: one webtorrent client for the process, torn down with the layer's scope. It
  * reads its connection options from `Settings` when the layer is built, so migration runs
@@ -247,27 +289,7 @@ export const WebTorrentEngineLive = Layer.scoped(
         }),
     )
     // Live apply: connection and speed limit changes reach the running client in one tick.
-    // Only the runtime-tunable keys matter; DHT/secure stay constructor options.
-    const liveKeys: ReadonlySet<string> = new Set([
-      'connectionLimit',
-      'downloadLimit',
-      'uploadLimit',
-      'maxLimitMult',
-    ])
-    yield* settings.changes.pipe(
-      Stream.runForEach((change) =>
-        liveKeys.has(change.key)
-          ? Effect.gen(function* () {
-              const current = yield* settings.snapshot
-              const limits = liveLimits(current)
-              client.maxConns = limits.maxConns
-              client.throttleDownload(limits.downloadLimit)
-              client.throttleUpload(limits.uploadLimit)
-            })
-          : Effect.void,
-      ),
-      Effect.forkScoped,
-    )
+    yield* subscribeLiveLimits(settings, client)
     return TorrentEngine.of({
       load: (torrentId, downloadPath) => load(client, torrentId, downloadPath),
     })
