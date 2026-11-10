@@ -42,6 +42,8 @@ describe('tagged errors', () => {
           return `${error.device}/${error.operation}: ${error.message}`
         case 'MigrationError':
           return `migration/${error.operation}: ${error.message}`
+        case 'PlaybackError':
+          return `playback/${error.target}: ${error.message}`
         case 'SettingsError':
           return `${error.key}: ${error.message}`
       }

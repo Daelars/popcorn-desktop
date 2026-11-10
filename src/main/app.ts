@@ -6,6 +6,7 @@ import { DatabaseServiceLive, SqliteLive, SqliteSettingsStoreLive } from './data
 import { FilePickerServiceLive } from './file-picker'
 import { LocalFilesLive } from './localfiles'
 import { LegacyMigrationLive } from './migration'
+import { PlaybackTargetsLive } from './playback-targets'
 import { PlayersServiceLive } from './players'
 import { ProvidersServiceLive } from './providers/registry'
 import { SearchServiceLive } from './search'
@@ -65,6 +66,8 @@ export const makeAppLayer = (input: AppLayerInput) => {
   const settingsEffects = SettingsEffectsLive.pipe(
     Layer.provide(Layer.mergeAll(settings, WindowServiceLive)),
   )
+  // Playback targets read the external players and the live sessions.
+  const playbackTargets = PlaybackTargetsLive.pipe(Layer.provide(Layer.mergeAll(players, streams)))
 
   return Layer.mergeAll(
     core,
@@ -77,6 +80,7 @@ export const makeAppLayer = (input: AppLayerInput) => {
     subtitles,
     collection,
     settingsEffects,
+    playbackTargets,
     WindowServiceLive,
     FilePickerServiceLive,
   )

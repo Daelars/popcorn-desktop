@@ -1,6 +1,8 @@
 ﻿import { Readable } from 'node:stream'
 import { Effect, Fiber, Layer, ManagedRuntime, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
+import { PlaybackTargets, PlaybackTargetsLive } from '../src/main/playback-targets'
+import { PlayersService } from '../src/main/players'
 import {
   chooseFile,
   matchesEpisode,
@@ -163,6 +165,71 @@ describe('StreamSession', () => {
       ),
     )
     expect(state._tag).toBe('Some')
+    await runtime.dispose()
+  })
+})
+
+describe('PlaybackTargets', () => {
+  function sessionFake() {
+    const ready = {
+      id: 'session-1',
+      infoHash: 'hash-1',
+      state: 'ready' as const,
+      url: 'http://127.0.0.1:41000/0',
+      port: 41000,
+      downloaded: 1,
+      uploaded: 0,
+      speed: 1,
+      peers: 1,
+      progress: 0.5,
+      length: 10,
+      timeRemaining: 0,
+    }
+    const closed: string[] = []
+    const shape = {
+      open: () => Effect.succeed({ id: 'session-1' }),
+      states: () => Stream.empty,
+      current: () => Effect.succeed(ready),
+      stateEvents: Stream.empty,
+      close: (id: string) => Effect.sync(() => void closed.push(id)),
+      closeAll: () => Effect.void,
+      files: () => Effect.die('unused'),
+      list: Effect.succeed([]),
+      pause: () => Effect.void,
+      resume: () => Effect.void,
+      progress: Stream.empty,
+    }
+    return { shape, closed }
+  }
+
+  it('lists local plus external players and plays each through its adapter', async () => {
+    const launched: string[] = []
+    const session = sessionFake()
+    const players = Layer.succeed(PlayersService, {
+      list: () => Effect.succeed([{ id: 'VLC', type: 'vlc', path: 'C:/VLC/vlc.exe' }]),
+      play: (request) => {
+        launched.push(request.playerId)
+        return Effect.void
+      },
+    })
+    const runtime = ManagedRuntime.make(
+      PlaybackTargetsLive.pipe(
+        Layer.provide(Layer.mergeAll(players, Layer.succeed(StreamSession, session.shape))),
+      ),
+    )
+
+    const targets = await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.list))
+    expect(targets.map((target) => target.id)).toEqual(['local', 'VLC'])
+
+    // Local is a no-op; external hands the session URL to the player.
+    await runtime.runPromise(
+      Effect.flatMap(PlaybackTargets, (t) => t.play(targets[0]!, 'session-1')),
+    )
+    await runtime.runPromise(
+      Effect.flatMap(PlaybackTargets, (t) => t.play(targets[1]!, 'session-1')),
+    )
+    expect(launched).toEqual(['VLC'])
+
     await runtime.dispose()
   })
 })

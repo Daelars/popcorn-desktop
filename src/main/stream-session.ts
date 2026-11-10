@@ -93,6 +93,8 @@ export interface StreamSessionShape {
   /** Opens a session and returns its id immediately; `states(id)` reports the loading state. */
   readonly open: (request: OpenRequest) => Effect.Effect<StreamSessionHandle, TorrentError>
   readonly states: (id: string) => Stream.Stream<StreamState>
+  /** The latest state for a session, or undefined when it is gone. */
+  readonly current: (id: string) => Effect.Effect<StreamState | undefined>
   /** Every state change across sessions, for the renderer event publisher. */
   readonly stateEvents: Stream.Stream<StreamState>
   readonly close: (id: string) => Effect.Effect<void>
@@ -314,6 +316,11 @@ export const StreamSessionLive = Layer.scoped(
           ),
         ),
       stateEvents: Stream.fromPubSub(stateBus),
+      current: (id) =>
+        Effect.gen(function* () {
+          const session = (yield* Ref.get(sessions)).get(id)
+          return session === undefined ? undefined : yield* SubscriptionRef.get(session.ref)
+        }),
       close,
       closeAll,
       files,

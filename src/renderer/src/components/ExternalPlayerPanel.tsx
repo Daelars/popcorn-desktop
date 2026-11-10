@@ -1,39 +1,45 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { ExternalLink, X } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
-import type { IpcResponse } from '../../../shared/ipc'
 import { popcorn } from '../bridge'
-
-type ExternalPlayer = IpcResponse<'players:list'>[number]
+import { failureText } from '../failure'
+import { notify } from '../notify'
 
 interface ExternalPlayerPanelProps {
   readonly source: string
   readonly title: string
   readonly fileIndex: number
+  /** The external target id chosen in the chooser. */
+  readonly targetId: string
 }
 
 /**
- * The legacy "streaming to an external player" flow: start the loopback stream, hand its
- * URL to the chosen player, and keep the torrent alive until the user stops it.
+ * The legacy "streaming to an external player" flow: start the loopback session, hand it to
+ * the chosen target, and keep the torrent alive until the player exits. The session closes
+ * itself when the player exits (PlaybackTargets), so no stream is left running behind it.
  */
-export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayerPanelProps) {
+export function ExternalPlayerPanel({
+  source,
+  title,
+  fileIndex,
+  targetId,
+}: ExternalPlayerPanelProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [streamingTo, setStreamingTo] = useState<string>()
   const sessionId = useRef<string | undefined>(undefined)
 
-  const players = useQuery({
-    queryKey: ['players'],
-    queryFn: async (): Promise<ReadonlyArray<ExternalPlayer>> => {
-      const bridge = popcorn()
-      return bridge.invoke('players:list', {})
-    },
-  })
+  const stop = () => {
+    const id = sessionId.current
+    sessionId.current = undefined
+    if (id !== undefined) void popcorn().invoke('stream:stop', { id })
+    setStreamingTo(undefined)
+  }
 
   const play = useMutation({
-    mutationFn: async (player: ExternalPlayer) => {
+    mutationFn: async () => {
       const bridge = popcorn()
       const session = await bridge.invoke('stream:start', {
         torrentId: source,
@@ -41,21 +47,19 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
         origin: window.location.origin,
       })
       sessionId.current = session.id
-      await bridge.invoke('players:play', { playerId: player.id, url: session.url, title })
-      setStreamingTo(player.id)
+      await bridge.invoke('playback:play', { targetId, sessionId: session.id, title })
+      setStreamingTo(targetId)
+    },
+    onError: (error) => {
+      stop()
+      notify(failureText(error))
     },
   })
 
-  const stop = () => {
-    const id = sessionId.current
-    sessionId.current = undefined
-    if (id !== undefined) {
-      void popcorn().invoke('stream:stop', { id })
-    }
-    setStreamingTo(undefined)
-  }
-
-  const list = players.data ?? []
+  // The target is already chosen; start it as soon as the panel mounts.
+  useEffect(() => {
+    play.mutate()
+  }, [play])
 
   return (
     <div className="file-selector-container">
@@ -73,33 +77,18 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
       </button>
       <div className="title">{t('External Player')}</div>
       <div className="content">
-        {streamingTo === undefined ? (
-          <ul className="file-list">
-            {list.map((player) => (
-              <li key={player.id} className="file-item">
-                <button type="button" className="player-choice" onClick={() => play.mutate(player)}>
-                  {player.id}
-                </button>
-              </li>
-            ))}
-            {players.data !== undefined && list.length === 0 ? (
-              <li style={{ marginTop: 30 }}>{t('No results found')}</li>
-            ) : null}
-          </ul>
-        ) : (
-          <div className="state-flex">
-            <div className="state">
-              <div className="external-play">
-                {t('Streaming to')} <span className="player-name">{streamingTo}</span>
-              </div>
-              <div id="cancel-button" className="cancel-button button">
-                <button type="button" className="cancel-button-text" onClick={stop}>
-                  {t('Cancel')}
-                </button>
-              </div>
+        <div className="state-flex">
+          <div className="state">
+            <div className="external-play">
+              {t('Streaming to')} <span className="player-name">{streamingTo ?? targetId}</span>
+            </div>
+            <div id="cancel-button" className="cancel-button button">
+              <button type="button" className="cancel-button-text" onClick={stop}>
+                {t('Cancel')}
+              </button>
             </div>
           </div>
-        )}
+        </div>
       </div>
       <div className="fakeskan" />
       <div className="external-hint">
