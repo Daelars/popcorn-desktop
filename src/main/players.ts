@@ -286,9 +286,9 @@ export interface PlayersShape {
   readonly play: (request: {
     readonly playerId: string
     readonly url: string
-    readonly subtitle?: string
-    readonly title?: string
-    readonly fullscreen?: boolean
+    readonly subtitle?: string | undefined
+    readonly title?: string | undefined
+    readonly fullscreen?: boolean | undefined
   }) => Effect.Effect<void>
 }
 

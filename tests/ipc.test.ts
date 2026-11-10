@@ -1,5 +1,7 @@
 import { Effect, Layer, ManagedRuntime, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
+import { CatalogServiceLive } from '../src/main/catalog'
+import { CollectionServiceLive } from '../src/main/collection'
 import { DatabaseServiceLive, SqliteLive, SqliteSettingsStoreLive } from '../src/main/database'
 import { FilePickerService } from '../src/main/file-picker'
 import {
@@ -15,7 +17,9 @@ import { PlayersService, playerArgs, playerCommand } from '../src/main/players'
 import { ProvidersService } from '../src/main/providers/registry'
 import { SearchService } from '../src/main/search'
 import { type SettingsEnvironment, SettingsServiceLive } from '../src/main/settings'
+import { SettingsEffectsLive } from '../src/main/settings-effects'
 import { StreamManager } from '../src/main/streams'
+import { SubtitlesServiceLive } from '../src/main/subtitles/service'
 import { UpdatesService } from '../src/main/updates'
 import { WindowService } from '../src/main/window'
 import type { IpcEnvelope } from '../src/shared/ipc'
@@ -52,7 +56,7 @@ async function harness() {
     Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
   )
   const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
-  const launched: Array<{ playerId: string; url: string; title?: string }> = []
+  const launched: Array<{ playerId: string; url: string; title?: string | undefined }> = []
 
   // One test Layer supplies every service the IPC handlers read from the context.
   const fakes = Layer.mergeAll(
@@ -123,7 +127,14 @@ async function harness() {
       install: () => Effect.void,
     }),
   )
-  const runtime = ManagedRuntime.make(Layer.mergeAll(settings, database, sqlite, fakes))
+  const base = Layer.mergeAll(settings, database, sqlite, fakes)
+  const derived = Layer.mergeAll(
+    CatalogServiceLive,
+    SubtitlesServiceLive,
+    CollectionServiceLive,
+    SettingsEffectsLive,
+  ).pipe(Layer.provide(base))
+  const runtime = ManagedRuntime.make(Layer.mergeAll(base, derived))
   const ipc = fakeIpcMain()
   registerIpc(ipc.port, runtime)
   return { runtime, invoke: ipc.invoke, launched }

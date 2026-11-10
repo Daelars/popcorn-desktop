@@ -1,5 +1,7 @@
 import { Layer } from 'effect'
 import type { UpdateStatus } from '../shared/ipc'
+import { CatalogServiceLive } from './catalog'
+import { CollectionServiceLive } from './collection'
 import { DatabaseServiceLive, SqliteLive, SqliteSettingsStoreLive } from './database'
 import { FilePickerServiceLive } from './file-picker'
 import { LocalFilesLive } from './localfiles'
@@ -8,7 +10,9 @@ import { PlayersServiceLive } from './players'
 import { ProvidersServiceLive } from './providers/registry'
 import { SearchServiceLive } from './search'
 import { type SettingsEnvironment, SettingsServiceLive } from './settings'
+import { SettingsEffectsLive } from './settings-effects'
 import { StreamManagerLive } from './streams'
+import { SubtitlesServiceLive } from './subtitles/service'
 import { TorrentServiceLive } from './torrent'
 import { type UpdatePort, UpdatesServiceLive } from './updates'
 import { WebTorrentEngineLive } from './webtorrent-engine'
@@ -55,6 +59,16 @@ export const makeAppLayer = (input: AppLayerInput) => {
     environment: input.environment,
   })
   const updates = UpdatesServiceLive(input.updatePort, input.publishUpdate)
+  const catalog = CatalogServiceLive.pipe(Layer.provide(Layer.mergeAll(providers, database)))
+  const subtitles = SubtitlesServiceLive.pipe(
+    Layer.provide(Layer.mergeAll(settings, LocalFilesLive)),
+  )
+  const collection = CollectionServiceLive.pipe(
+    Layer.provide(Layer.mergeAll(FilePickerServiceLive, settings, database)),
+  )
+  const settingsEffects = SettingsEffectsLive.pipe(
+    Layer.provide(Layer.mergeAll(settings, WindowServiceLive)),
+  )
 
   return Layer.mergeAll(
     core,
@@ -63,6 +77,10 @@ export const makeAppLayer = (input: AppLayerInput) => {
     providers,
     players,
     updates,
+    catalog,
+    subtitles,
+    collection,
+    settingsEffects,
     WindowServiceLive,
     FilePickerServiceLive,
   )
