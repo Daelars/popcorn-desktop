@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { SettingsKey } from '../../../shared/settings'
 import { changeLanguage, languages } from '../i18n'
+import { notify } from '../notify'
 import { useSettings } from '../settings'
 import { themes } from '../theme'
 
@@ -583,7 +584,15 @@ export function SettingsPage() {
             </div>
           </span>
           <span>
-            <Checkbox settingKey="nativeWindowFrame" label="Native window frame" update={update} />
+            {/* The frame is set when the window is created; the legacy app required a restart. */}
+            <Checkbox
+              settingKey="nativeWindowFrame"
+              label="Native window frame"
+              update={(key, value) => {
+                update(key, value)
+                notify(t('Restart required'))
+              }}
+            />
           </span>
           <span>
             <Checkbox settingKey="alwaysOnTop" label="Always On Top" update={update} />

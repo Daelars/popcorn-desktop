@@ -1,12 +1,11 @@
 ﻿import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { Effect, ManagedRuntime, Stream } from 'effect'
+import { Effect, ManagedRuntime, Schedule, Stream } from 'effect'
 import { app, BrowserWindow, ipcMain, screen, session, shell } from 'electron'
 import { makeAppLayer } from './app'
 import { registerIpc } from './ipc'
 import { resolveLegacyProfileRoot } from './migration'
 import { type SettingsEnvironment, SettingsService } from './settings'
-import { smokePlay, smokeTest } from './smoke'
 import { StreamManager } from './streams'
 import { createAutoUpdaterPort, UpdatesService } from './updates'
 import { zoomLevelFor } from './window'
@@ -111,7 +110,7 @@ function sendOpenTarget(target: string): void {
   window.webContents.send('window:openFile', target)
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(frame: boolean): BrowserWindow {
   applyContentSecurityPolicy()
   const window = new BrowserWindow({
     width: 960,
@@ -120,15 +119,21 @@ function createWindow(): BrowserWindow {
     minHeight: 520,
     show: false,
     autoHideMenuBar: true,
-    // Frameless with a custom titlebar; macOS keeps its inset traffic lights.
-    frame: false,
-    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const } : {}),
+    // `nativeWindowFrame` chooses the OS frame; otherwise a custom titlebar is drawn.
+    frame,
+    ...(process.platform === 'darwin' && frame === false
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
     },
+  })
+
+  window.on('ready-to-show', () => {
+    window.show()
   })
 
   window.on('ready-to-show', () => {
@@ -211,28 +216,40 @@ function startApp() {
   return runtime
 }
 
-type AppRuntime = ReturnType<typeof startApp>
-
-/** Applies the configured UI scale once settings are available. */
-function applyZoom(runtime: AppRuntime, window: BrowserWindow): void {
-  runtime.runFork(
-    Effect.flatMap(SettingsService, (settings) => settings.get('bigPicture')).pipe(
-      Effect.tap((percent) =>
-        Effect.sync(() => window.webContents.setZoomLevel(zoomLevelFor(percent))),
-      ),
-    ),
-  )
-}
-
-/** Checks on start-up once the renderer can hear the status, then every six hours. */
-function scheduleUpdates(runtime: AppRuntime, window: BrowserWindow): void {
-  window.webContents.once('did-finish-load', () => {
-    runtime.runFork(Effect.flatMap(UpdatesService, (updates) => updates.check(false)))
+/** Resolves once the renderer document has loaded (immediately if it already has). */
+const waitForLoad = (window: BrowserWindow): Effect.Effect<void> =>
+  Effect.async<void>((resume) => {
+    if (!window.webContents.isLoading()) {
+      resume(Effect.void)
+      return
+    }
+    window.webContents.once('did-finish-load', () => resume(Effect.void))
   })
-  setInterval(
-    () => runtime.runFork(Effect.flatMap(UpdatesService, (updates) => updates.check(false))),
-    6 * 60 * 60 * 1000,
-  ).unref()
+
+/**
+ * Opens a window and runs the platform-independent start-up lifecycle as one effect: the
+ * frame and zoom come from Settings, the first-launch open target is delivered once the
+ * renderer is ready, and the update check repeats every six hours on a scoped fiber that
+ * the runtime interrupts on dispose.
+ */
+function openWindow(): Effect.Effect<void, never, SettingsService | UpdatesService> {
+  return Effect.gen(function* () {
+    const settings = yield* SettingsService
+    const frame = yield* settings.get('nativeWindowFrame')
+    const zoom = yield* settings.get('bigPicture')
+    const window = yield* Effect.sync(() => createWindow(frame))
+    yield* Effect.sync(() => window.webContents.setZoomLevel(zoomLevelFor(zoom)))
+
+    // `nw.App.argv.pop()`: the first launch may carry a file or link to open.
+    const target = openTarget(process.argv)
+    if (target !== undefined) yield* Effect.sync(() => sendOpenTarget(target))
+
+    yield* waitForLoad(window).pipe(
+      Effect.zipRight(Effect.flatMap(UpdatesService, (updates) => updates.check(false))),
+      Effect.repeat(Schedule.spaced('6 hours')),
+      Effect.fork,
+    )
+  })
 }
 
 // A second launch hands its target to the running window instead of opening another window.
@@ -257,7 +274,9 @@ void app.whenReady().then(async () => {
   const runtime = startApp()
 
   if (process.env.POPCORN_SMOKE_PLAY !== undefined) {
-    const window = createWindow()
+    // Loaded only when the smoke drive is requested; keeps the normal bundle out of it.
+    const { smokePlay } = await import('./smoke')
+    const window = createWindow(false)
     // Forward the renderer console and crash details; without them a dead renderer is silent.
     window.webContents.on('console-message', (event) => {
       const detail = event as unknown as { message?: string; lineNumber?: number }
@@ -280,24 +299,15 @@ void app.whenReady().then(async () => {
   }
 
   if (process.env.POPCORN_SMOKE_MAGNET !== undefined) {
+    const { smokeTest } = await import('./smoke')
     await smokeTest(runtime)
     return
   }
 
-  const window = createWindow()
-  applyZoom(runtime, window)
+  runtime.runFork(openWindow())
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      const next = createWindow()
-      applyZoom(runtime, next)
-
-      // `nw.App.argv.pop()`: the first launch may carry a file or link to open.
-      const initialTarget = openTarget(process.argv)
-      if (initialTarget !== undefined) sendOpenTarget(initialTarget)
-
-      scheduleUpdates(runtime, next)
-    }
+    if (BrowserWindow.getAllWindows().length === 0) runtime.runFork(openWindow())
   })
 
   app.on('will-quit', () => {
