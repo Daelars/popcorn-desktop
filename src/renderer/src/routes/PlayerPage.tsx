@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router'
 import { Show } from '../../../shared'
+import type { StreamState } from '../../../shared/ipc'
 import { nextEpisode as nextEpisodeRule } from '../../../shared/playback-rules'
 import { popcorn } from '../bridge'
 import { ExternalPlayerPanel } from '../components/ExternalPlayerPanel'
@@ -48,10 +49,26 @@ export function PlayerPage() {
   const [minimized, setMinimized] = useState(false)
   const [localTitle, setLocalTitle] = useState('')
   const [subtitles, setSubtitles] = useState<ReadonlyArray<SubtitleTrack>>([])
+  /** The loading state machine for the session this page started, keyed by its id. */
+  const [streamState, setStreamState] = useState<StreamState>()
+  const latestStates = useRef(new Map<string, StreamState>())
   const sessionPort = useRef<number | undefined>(undefined)
   const sessionId = useRef<string | undefined>(undefined)
   const sessionKind = useRef<'stream' | 'local'>('stream')
   const chosenPlayer = useSetting('chosenPlayer').data ?? 'local'
+
+  // `stream:start` resolves at `ready`; the earlier states (`startingDownload`, `downloading`,
+  // `waitingForSubtitles`) arrive out-of-band, so subscribe and keep the latest per session.
+  useEffect(() => {
+    const bridge = popcorn()
+    return bridge.onState((state) => {
+      latestStates.current.set(state.id, state)
+      const id = sessionId.current
+      // Until the id is known the only session this page started is the pending one; a replayed
+      // `closed` from a previous episode must not drive the screen.
+      if (id === undefined ? state.state !== 'closed' : state.id === id) setStreamState(state)
+    })
+  }, [])
 
   // The show is already in the media cache when playback started from a detail page; the
   // episode list is what `processNext` used to find the next episode.
@@ -117,6 +134,7 @@ export function PlayerPage() {
     // A new source shows the connecting screen again instead of the previous player.
     setSrc(undefined)
     setFailure(undefined)
+    setStreamState(undefined)
     const kind = localPath === '' ? 'stream' : 'local'
     sessionKind.current = kind
     const stop = (port: number) =>
@@ -178,8 +196,13 @@ export function PlayerPage() {
           return
         }
         setSubtitles(tracks)
-        if ('id' in session) sessionId.current = session.id
-        else sessionPort.current = session.port
+        if ('id' in session) {
+          sessionId.current = session.id
+          // The id is known now, so show whatever the pending session last reported.
+          setStreamState(latestStates.current.get(session.id))
+        } else {
+          sessionPort.current = session.port
+        }
         setSrc(session.url)
       })
       .catch((error: unknown) => {
@@ -260,7 +283,7 @@ export function PlayerPage() {
       <LoadingScreen
         title={displayTitle}
         {...(backdrop === '' ? {} : { backdrop })}
-        state="connecting"
+        state={streamState?.state ?? 'connecting'}
         onCancel={() => navigate(-1)}
       />
     )

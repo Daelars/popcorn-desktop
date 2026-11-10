@@ -81,6 +81,9 @@ export const PlaybackTargetsLive = Layer.effect(
             },
             { onExit: () => Deferred.unsafeDone(exited, Effect.void) },
           )
+          // The legacy reported `playingExternally` once the player owned the stream; a local
+          // session is left at `ready` (its adapter is the renderer itself).
+          yield* sessions.markPlayingExternally(sessionId)
           yield* Deferred.await(exited).pipe(
             Effect.zipRight(sessions.close(sessionId)),
             Effect.fork,

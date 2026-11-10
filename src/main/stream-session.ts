@@ -100,6 +100,11 @@ export interface StreamSessionShape {
   readonly states: (id: string) => Stream.Stream<StreamState>
   /** The latest state for a session, or undefined when it is gone. */
   readonly current: (id: string) => Effect.Effect<StreamState | undefined>
+  /**
+   * Marks a ready session as playing in an external player (the legacy `playingExternally`
+   * terminal state). A local session stays at `ready`.
+   */
+  readonly markPlayingExternally: (id: string) => Effect.Effect<void>
   /** Every state change across sessions, for the renderer event publisher. */
   readonly stateEvents: Stream.Stream<StreamState>
   readonly close: (id: string) => Effect.Effect<void>
@@ -357,6 +362,13 @@ export const StreamSessionLive = Layer.scoped(
         Effect.gen(function* () {
           const session = (yield* Ref.get(sessions)).get(id)
           return session === undefined ? undefined : yield* SubscriptionRef.get(session.ref)
+        }),
+      markPlayingExternally: (id) =>
+        Effect.gen(function* () {
+          const session = (yield* Ref.get(sessions)).get(id)
+          if (session === undefined) return
+          yield* patch(session.ref, { state: 'playingExternally' })
+          yield* publish(yield* SubscriptionRef.get(session.ref))
         }),
       close,
       closeAll,

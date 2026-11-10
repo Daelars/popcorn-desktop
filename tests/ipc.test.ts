@@ -114,6 +114,7 @@ async function harness() {
       open: () => Effect.succeed({ id: 'session-1' }),
       states: () => Stream.empty,
       current: () => Effect.succeed(undefined),
+      markPlayingExternally: () => Effect.void,
       stateEvents: Stream.empty,
       close: () => Effect.void,
       closeAll: () => Effect.void,
