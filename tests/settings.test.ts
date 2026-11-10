@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Effect, Exit, Layer, ManagedRuntime } from 'effect'
 import { describe, expect, it } from 'vitest'
+import { LegacyMigration } from '../src/main/legacy-migration'
+import { NOT_MIGRATED } from '../src/main/migration'
 import {
   type SettingsEnvironment,
   SettingsService,
@@ -59,13 +61,22 @@ function legacyKeys(): string[] {
 
 const run = <A, E>(effect: Effect.Effect<A, E, SettingsService>, store = storeLayer()) =>
   Effect.runPromise(
-    Effect.provide(effect, SettingsServiceLive(environment).pipe(Layer.provide(store.layer))),
+    Effect.provide(
+      effect,
+      SettingsServiceLive(environment).pipe(
+        Layer.provide(store.layer),
+        Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
+      ),
+    ),
   )
 
 /** One service instance per test: a managed runtime keeps the layer built across calls. */
 function makeRun(store = storeLayer()) {
   const runtime = ManagedRuntime.make(
-    SettingsServiceLive(environment).pipe(Layer.provide(store.layer)),
+    SettingsServiceLive(environment).pipe(
+      Layer.provide(store.layer),
+      Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
+    ),
   )
   return {
     store,
@@ -151,7 +162,10 @@ describe('SettingsService', () => {
     const exit = await Effect.runPromiseExit(
       Effect.provide(
         Effect.flatMap(SettingsService, (settings) => settings.set('not_a_key', 1)),
-        SettingsServiceLive(environment).pipe(Layer.provide(storeLayer().layer)),
+        SettingsServiceLive(environment).pipe(
+          Layer.provide(storeLayer().layer),
+          Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
+        ),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)
@@ -177,7 +191,10 @@ describe('SettingsService', () => {
         Effect.flatMap(SettingsService, (settings) =>
           settings.set('theme', 'Official_-_Light_theme'),
         ),
-        SettingsServiceLive(environment).pipe(Layer.provide(failingStoreLayer())),
+        SettingsServiceLive(environment).pipe(
+          Layer.provide(failingStoreLayer()),
+          Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
+        ),
       ),
     )
     expect(Exit.isFailure(exit)).toBe(true)

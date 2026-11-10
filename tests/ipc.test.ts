@@ -12,6 +12,8 @@ import {
   type IpcMainPort,
   registerIpc,
 } from '../src/main/ipc'
+import { LegacyMigration } from '../src/main/legacy-migration'
+import { NOT_MIGRATED } from '../src/main/migration'
 import { playerArgs, playerCommand } from '../src/main/players'
 import {
   type SettingsEnvironment,
@@ -49,6 +51,7 @@ async function harness() {
   const sqlite = SqliteLive(':memory:')
   const settings = SettingsServiceLive(environment).pipe(
     Layer.provide(SqliteSettingsStoreLive.pipe(Layer.provide(sqlite))),
+    Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
   )
   const database = DatabaseServiceLive.pipe(Layer.provide(sqlite))
   const runtime = ManagedRuntime.make(Layer.mergeAll(settings, database, sqlite))

@@ -9,6 +9,8 @@ import {
   SqliteLive,
   SqliteSettingsStoreLive,
 } from '../src/main/database'
+import { LegacyMigration } from '../src/main/legacy-migration'
+import { NOT_MIGRATED } from '../src/main/migration'
 import {
   type SettingsEnvironment,
   SettingsService,
@@ -157,6 +159,7 @@ describe('SqliteSettingsStore', () => {
 
     const layers = SettingsServiceLive(environment).pipe(
       Layer.provide(SqliteSettingsStoreLive.pipe(Layer.provide(SqliteLive(file)))),
+      Layer.provide(Layer.succeed(LegacyMigration, { result: NOT_MIGRATED })),
     )
 
     const first = ManagedRuntime.make(layers)

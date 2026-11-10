@@ -1,7 +1,10 @@
 import { cpSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Database as SqliteDatabase } from 'better-sqlite3'
-import { DbError } from '../shared/errors'
+import { Effect, Layer } from 'effect'
+import { MigrationError } from '../shared/errors'
+import { Sqlite } from './database'
+import { LegacyMigration } from './legacy-migration'
 
 const MIGRATION_MARKER = 'legacy_migration'
 
@@ -33,6 +36,14 @@ const EMPTY_COUNTS: MigrationCounts = {
   settings: 0,
   movies: 0,
   shows: 0,
+}
+
+/** The result when migration does not run: no profile found, or it failed and startup recovered. */
+export const NOT_MIGRATED: MigrationResult = {
+  migrated: false,
+  counts: EMPTY_COUNTS,
+  malformedLines: 0,
+  skipped: [],
 }
 
 const LEGACY_APP_NAME = 'Popcorn-Time'
@@ -124,13 +135,28 @@ function isMigrated(db: SqliteDatabase): boolean {
 }
 
 /**
- * Moves a legacy profile (NeDB files under `<data_path>/data`) into SQLite. Runs once,
- * records its marker in the same transaction, and never writes to the legacy files.
+ * Keys the runtime derives from the environment, so a stale legacy row must never win over
+ * the current value. Migration drops each of these instead of importing them:
+ * `version`, `os`, `arch`, `releaseName`, `tmpLocation`, `databaseLocation`, `ipAddress`.
  */
-export function migrateLegacy(
+const RUNTIME_KEYS: ReadonlySet<string> = new Set([
+  'version',
+  'os',
+  'arch',
+  'releaseName',
+  'tmpLocation',
+  'databaseLocation',
+  'ipAddress',
+])
+
+/**
+ * Synchronous migration body. It throws `MigrationError`; `migrateLegacy` turns that into an
+ * Effect failure so a defect can never reject startup.
+ */
+function runMigration(
   db: SqliteDatabase,
   legacyRoot: string,
-  options: MigrationOptions = {},
+  options: MigrationOptions,
 ): MigrationResult {
   if (isMigrated(db)) {
     return { migrated: false, counts: EMPTY_COUNTS, malformedLines: 0, skipped: [] }
@@ -142,7 +168,7 @@ export function migrateLegacy(
     try {
       cpSync(dataDir, options.backupDir, { recursive: true })
     } catch (cause) {
-      throw new DbError({
+      throw new MigrationError({
         message: `could not back up legacy data to ${options.backupDir}; migration aborted`,
         operation: 'migrate.backup',
         cause,
@@ -216,6 +242,8 @@ export function migrateLegacy(
     for (const record of settings.records) {
       const key = text(record.key)
       if (key === undefined || record.value === undefined) continue
+      // Runtime-derived keys are dropped rather than imported (see RUNTIME_KEYS).
+      if (RUNTIME_KEYS.has(key)) continue
       insertSetting.run(key, JSON.stringify(record.value))
       counts.settings += 1
     }
@@ -249,7 +277,7 @@ export function migrateLegacy(
   try {
     migrate()
   } catch (cause) {
-    throw new DbError({
+    throw new MigrationError({
       message: 'legacy migration failed; legacy data is untouched',
       operation: 'migrate',
       cause,
@@ -263,3 +291,60 @@ export function migrateLegacy(
 
   return { migrated: true, counts, malformedLines, skipped }
 }
+
+/**
+ * Runs the migration as an `Effect`: failures are the tagged `MigrationError`, never a
+ * defect that could reject startup.
+ */
+export function migrateLegacy(
+  db: SqliteDatabase,
+  legacyRoot: string,
+  options: MigrationOptions = {},
+): Effect.Effect<MigrationResult, MigrationError> {
+  return Effect.try({
+    try: () => runMigration(db, legacyRoot, options),
+    catch: (cause) =>
+      cause instanceof MigrationError
+        ? cause
+        : new MigrationError({
+            message: 'legacy migration failed; legacy data is untouched',
+            operation: 'migrate',
+            cause,
+          }),
+  })
+}
+
+export interface LegacyMigrationLayerOptions {
+  /** The resolved NW.js profile, or undefined when none was found. */
+  readonly legacyRoot: string | undefined
+  readonly backupDir?: string
+  /** Called when the migration fails; startup continues with an empty database. */
+  readonly onError?: (error: MigrationError) => void
+}
+
+/**
+ * The migration as a Layer that Settings depends on: building the layer runs it (once, guarded
+ * by the marker in `meta`) before any settings are read. A failure is reported and swallowed so
+ * startup never depends on a readable legacy profile.
+ */
+export const LegacyMigrationLive = (options: LegacyMigrationLayerOptions) =>
+  Layer.effect(
+    LegacyMigration,
+    Effect.gen(function* () {
+      const db = yield* Sqlite
+      if (options.legacyRoot === undefined) {
+        return LegacyMigration.of({ result: NOT_MIGRATED })
+      }
+      const result = yield* migrateLegacy(db, options.legacyRoot, {
+        ...(options.backupDir === undefined ? {} : { backupDir: options.backupDir }),
+      }).pipe(
+        Effect.catchAll((error) =>
+          Effect.sync(() => {
+            options.onError?.(error)
+            return NOT_MIGRATED
+          }),
+        ),
+      )
+      return LegacyMigration.of({ result })
+    }),
+  )

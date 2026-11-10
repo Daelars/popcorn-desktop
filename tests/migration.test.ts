@@ -1,9 +1,12 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Effect, Layer, ManagedRuntime } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { openDatabase } from '../src/main/database'
-import { migrateLegacy, resolveLegacyProfileRoot } from '../src/main/migration'
+import { openDatabase, Sqlite } from '../src/main/database'
+import { LegacyMigration } from '../src/main/legacy-migration'
+import { LegacyMigrationLive, migrateLegacy, resolveLegacyProfileRoot } from '../src/main/migration'
+import { MigrationError } from '../src/shared/errors'
 
 function fixtureProfile(): { legacyRoot: string; backupDir: string } {
   const root = mkdtempSync(join(tmpdir(), 'popcorn-legacy-'))
@@ -63,7 +66,7 @@ describe('migrateLegacy', () => {
     const { legacyRoot, backupDir } = fixtureProfile()
     const db = openDatabase(':memory:')
 
-    const result = migrateLegacy(db, legacyRoot, { backupDir })
+    const result = Effect.runSync(migrateLegacy(db, legacyRoot, { backupDir }))
 
     expect(result.migrated).toBe(true)
     expect(result.counts).toEqual({
@@ -96,8 +99,8 @@ describe('migrateLegacy', () => {
     const { legacyRoot, backupDir } = fixtureProfile()
     const db = openDatabase(':memory:')
 
-    const first = migrateLegacy(db, legacyRoot, { backupDir })
-    const second = migrateLegacy(db, legacyRoot, { backupDir })
+    const first = Effect.runSync(migrateLegacy(db, legacyRoot, { backupDir }))
+    const second = Effect.runSync(migrateLegacy(db, legacyRoot, { backupDir }))
 
     expect(first.migrated).toBe(true)
     expect(second.migrated).toBe(false)
@@ -109,7 +112,7 @@ describe('migrateLegacy', () => {
     const root = mkdtempSync(join(tmpdir(), 'popcorn-empty-'))
     const db = openDatabase(':memory:')
 
-    const result = migrateLegacy(db, root)
+    const result = Effect.runSync(migrateLegacy(db, root))
 
     expect(result.migrated).toBe(true)
     expect(result.counts.bookmarks).toBe(0)
@@ -167,5 +170,30 @@ describe('resolveLegacyProfileRoot', () => {
       )
       expect(resolution.root).toBe(join(base, 'Default'))
     }
+  })
+})
+
+describe('LegacyMigration layer', () => {
+  it('keeps the backup, reports the error and recovers when migration fails', async () => {
+    const { legacyRoot, backupDir } = fixtureProfile()
+    const db = openDatabase(':memory:')
+    // Break the schema so the migration transaction throws after the backup is taken.
+    db.exec('DROP TABLE bookmarks')
+    const errors: MigrationError[] = []
+    const runtime = ManagedRuntime.make(
+      LegacyMigrationLive({ legacyRoot, backupDir, onError: (error) => errors.push(error) }).pipe(
+        Layer.provide(Layer.succeed(Sqlite, db)),
+      ),
+    )
+
+    const result = await runtime.runPromise(
+      Effect.flatMap(LegacyMigration, (migration) => Effect.succeed(migration.result)),
+    )
+
+    expect(result.migrated).toBe(false)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toBeInstanceOf(MigrationError)
+    expect(existsSync(join(backupDir, 'bookmarks.db'))).toBe(true)
+    await runtime.dispose()
   })
 })
