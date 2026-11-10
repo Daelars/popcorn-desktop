@@ -18,7 +18,7 @@ import { ProvidersService } from '../src/main/providers/registry'
 import { SearchService } from '../src/main/search'
 import { type SettingsEnvironment, SettingsServiceLive } from '../src/main/settings'
 import { SettingsEffectsLive } from '../src/main/settings-effects'
-import { StreamManager } from '../src/main/streams'
+import { StreamSession } from '../src/main/stream-session'
 import { SubtitlesServiceLive } from '../src/main/subtitles/service'
 import { UpdatesService } from '../src/main/updates'
 import { WindowService } from '../src/main/window'
@@ -97,11 +97,12 @@ async function harness() {
         return Effect.void
       },
     }),
-    Layer.succeed(StreamManager, {
-      start: () =>
-        Effect.succeed({ infoHash: 'hash-1', port: 41000, url: 'http://127.0.0.1:41000/0' }),
-      stopSession: () => Effect.void,
-      stop: () => Effect.void,
+    Layer.succeed(StreamSession, {
+      open: () => Effect.succeed({ id: 'session-1' }),
+      states: () => Stream.empty,
+      stateEvents: Stream.empty,
+      close: () => Effect.void,
+      closeAll: () => Effect.void,
       files: () =>
         Effect.succeed({
           infoHash: 'hash-1',

@@ -22,7 +22,7 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [streamingTo, setStreamingTo] = useState<string>()
-  const sessionPort = useRef<number | undefined>(undefined)
+  const sessionId = useRef<string | undefined>(undefined)
 
   const players = useQuery({
     queryKey: ['players'],
@@ -40,17 +40,17 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
         fileIndex,
         origin: window.location.origin,
       })
-      sessionPort.current = session.port
+      sessionId.current = session.id
       await bridge.invoke('players:play', { playerId: player.id, url: session.url, title })
       setStreamingTo(player.id)
     },
   })
 
   const stop = () => {
-    const port = sessionPort.current
-    sessionPort.current = undefined
-    if (port !== undefined) {
-      void popcorn().invoke('stream:stop', { port })
+    const id = sessionId.current
+    sessionId.current = undefined
+    if (id !== undefined) {
+      void popcorn().invoke('stream:stop', { id })
     }
     setStreamingTo(undefined)
   }
