@@ -1,6 +1,19 @@
-import { Schema } from 'effect'
+﻿import { Schema } from 'effect'
 import { describe, expect, it } from 'vitest'
-import { Filters, ImdbId, type ImdbId as ImdbIdType, Movie, Show } from '../src/shared/index'
+import {
+  autoplayPolicy,
+  closeState,
+  type Episode,
+  Filters,
+  ImdbId,
+  type ImdbId as ImdbIdType,
+  isWatched,
+  Movie,
+  nearEnd,
+  nextEpisode,
+  resumeAt,
+  Show,
+} from '../src/shared/index'
 
 const ytsTorrent = {
   url: 'magnet:?xt=urn:btih:AABBCC&dn=The.Shawshank.Redemption.1080p-YTS',
@@ -170,5 +183,43 @@ describe('branded ids', () => {
   it('rejects bare strings at compile time', () => {
     // @ts-expect-error a bare string is not a branded ImdbId
     takesImdbId('tt0111161')
+  })
+})
+
+describe('playback rules', () => {
+  it('resumes only for the same title', () => {
+    expect(resumeAt('A', { title: 'A', time: 120 })).toBe(120)
+    expect(resumeAt('A', { title: 'B', time: 120 })).toBeUndefined()
+    expect(resumeAt('A', { title: 'A', time: false })).toBeUndefined()
+  })
+
+  it('counts a title watched at 80% and resumes otherwise', () => {
+    expect(isWatched(80, 100)).toBe(true)
+    expect(isWatched(79, 100)).toBe(false)
+    expect(closeState(80, 100)).toEqual({ watched: true })
+    expect(closeState(40, 100)).toEqual({ watched: false, resumeTime: 35 })
+    expect(closeState(0, 100)).toEqual({ watched: false })
+  })
+
+  it('offers the next episode only in the final minute', () => {
+    expect(nearEnd(100, 150)).toBe(true)
+    expect(nearEnd(20, 150)).toBe(false)
+    expect(nearEnd(100, 300)).toBe(false)
+  })
+
+  it('crosses a season boundary for the next episode', () => {
+    const episodes = [
+      { season: 1, episode: 1, tvdb_id: 1, torrents: {} },
+      { season: 1, episode: 2, tvdb_id: 2, torrents: {} },
+      { season: 2, episode: 1, tvdb_id: 3, torrents: {} },
+    ] as unknown as ReadonlyArray<Episode>
+    expect(nextEpisode(episodes, { season: '1', episode: '2' })?.tvdb_id).toBe(3)
+    expect(nextEpisode(episodes, { season: '1', episode: '9' })).toBeUndefined()
+  })
+
+  it('honours "No thank you"', () => {
+    expect(autoplayPolicy({ autoPlay: true, dismissed: false })).toBe(true)
+    expect(autoplayPolicy({ autoPlay: true, dismissed: true })).toBe(false)
+    expect(autoplayPolicy({ autoPlay: false, dismissed: false })).toBe(false)
   })
 })
