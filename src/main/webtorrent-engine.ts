@@ -281,6 +281,11 @@ export const WebTorrentEngineLive = Layer.scoped(
             dht: { concurrency: options.dhtConcurrency },
             secure: options.secure,
             tracker: { announce: options.announce },
+            // uTP binds UDP on the TCP port webtorrent picked at random. On Windows that port
+            // can sit in a reserved UDP range (Hyper-V/WSL), and utp-native then throws
+            // "permission denied" synchronously, crashing the main process. TCP-only peers
+            // are enough for streaming.
+            utp: false,
           }),
       ),
       (instance) =>

@@ -257,6 +257,27 @@ const SHELL_OVERRIDES = `
 }
 .torrent-collection-container .content .onlinesearch .collection-paste:hover,
 .torrent-collection-container .content .onlinesearch .collection-import:hover { color: var(--ButtonBgActive); }
+
+/*
+ * The playback-error overlay deliberately avoids .vjs-control-window: the theme docks
+ * those at the bottom with no background and hides them in several player states
+ * (playing-but-idle, error), which left failures as a bare black screen. This sits
+ * centred above the video instead, with its own backdrop and buttons.
+ */
+.player .player-error {
+  position: absolute; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 24px; text-align: center;
+  background: rgba(0, 0, 0, 0.88); color: #fff;
+}
+.player .player-error-title { font-size: 16px; font-weight: bold; }
+.player .player-error-body { font-size: 13px; opacity: 0.85; }
+.player .player-error-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.player .player-error-button {
+  background: #2a2a2a; color: #fff; border: 1px solid #555; border-radius: 4px;
+  padding: 8px 16px; font-size: 13px; cursor: pointer;
+}
+.player .player-error-button:hover { background: #3a3a3a; }
 `
 
 /**

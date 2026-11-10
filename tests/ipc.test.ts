@@ -63,10 +63,10 @@ async function harness() {
       list: Effect.succeed<ReadonlyArray<PlaybackTarget>>([
         { kind: 'local', id: 'local', name: 'Popcorn Time' },
       ]),
-      play: (_target, sessionId) =>
+      play: (_target, source) =>
         Effect.succeed({
           target: { kind: 'local' as const, id: 'local' as const, name: 'Popcorn Time' },
-          sessionId,
+          sessionId: 'sessionId' in source ? source.sessionId : '',
         }),
     }),
     Layer.succeed(WindowService, {

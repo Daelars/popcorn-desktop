@@ -20,7 +20,8 @@ export interface PlaybackTargetsShape {
   readonly list: Effect.Effect<ReadonlyArray<PlaybackTarget>>
   readonly play: (
     target: PlaybackTarget,
-    sessionId: string,
+    /** A live stream session, or a bare loopback URL for a local file. */
+    source: { readonly sessionId: string } | { readonly url: string },
     options?: PlaybackOptions,
   ) => Effect.Effect<PlaybackHandle, PlaybackError>
 }
@@ -54,10 +55,29 @@ export const PlaybackTargetsLive = Layer.effect(
           })),
         ],
       ),
-      play: (target, sessionId, options = {}) =>
+      play: (target, source, options = {}) =>
         Effect.gen(function* () {
-          if (target.kind === 'local') return { target, sessionId }
+          if (target.kind === 'local') {
+            return {
+              target,
+              sessionId: 'sessionId' in source ? source.sessionId : '',
+            }
+          }
 
+          // A bare URL (a served local file) needs no session lookup and no
+          // session to close afterwards; the caller owns the local server.
+          if ('url' in source) {
+            yield* players.play({
+              playerId: target.id,
+              url: source.url,
+              ...(options.title === undefined ? {} : { title: options.title }),
+              ...(options.subtitle === undefined ? {} : { subtitle: options.subtitle }),
+              ...(options.fullscreen === undefined ? {} : { fullscreen: options.fullscreen }),
+            })
+            return { target, sessionId: '' }
+          }
+
+          const sessionId = source.sessionId
           const state = yield* sessions.current(sessionId)
           if (state === undefined || state.url === '') {
             return yield* Effect.fail(
