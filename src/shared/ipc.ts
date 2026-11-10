@@ -1,5 +1,6 @@
 import { Schema } from 'effect'
-import { Filters, Provider } from './provider'
+import { FetchResult, Filters, Provider, ProviderFilters } from './provider'
+import type { Settings, SettingsKey } from './settings'
 
 /** Request/response contracts for every IPC channel. Validated on both sides. */
 export const contracts = {
@@ -75,11 +76,11 @@ export const contracts = {
   },
   'browse:fetch': {
     request: Schema.Struct({ provider: Schema.String, filters: Filters }),
-    response: Schema.Unknown,
+    response: FetchResult,
   },
   'browse:filters': {
     request: Schema.Struct({ provider: Schema.String }),
-    response: Schema.Unknown,
+    response: ProviderFilters,
   },
   'media:getMovie': {
     request: Schema.Struct({ imdbId: Schema.String }),
@@ -396,10 +397,17 @@ export function toIpcFailure(error: unknown): IpcFailure {
 
 /** The renderer-facing API surface, implemented by the preload bridge. */
 export interface PopcornBridge {
-  readonly invoke: <K extends IpcChannel>(
-    channel: K,
-    request: IpcRequest<K>,
-  ) => Promise<IpcResponse<K>>
+  /** Settings are generic over the key, so a value's type comes from the schema. */
+  invoke<K extends SettingsKey>(
+    channel: 'settings:get',
+    request: { readonly key: K },
+  ): Promise<Settings[K]>
+  invoke<K extends SettingsKey>(
+    channel: 'settings:set',
+    request: { readonly key: K; readonly value: Settings[K] },
+  ): Promise<void>
+  invoke(channel: 'settings:all', request: Record<string, never>): Promise<Partial<Settings>>
+  invoke<K extends IpcChannel>(channel: K, request: IpcRequest<K>): Promise<IpcResponse<K>>
   readonly onProgress: (
     listener: (payload: IpcEventPayload<'streams:progress'>) => void,
   ) => () => void

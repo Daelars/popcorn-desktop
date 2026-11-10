@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { NavLink, useMatch } from 'react-router'
 import type { Filters } from '../../../shared'
 import type { SettingsKey } from '../../../shared/settings'
+import { popcorn } from '../bridge'
 import type { ProviderFilterOptions } from '../browse'
 import { useSetting } from '../settings'
 
@@ -227,9 +228,7 @@ export function FilterBar({
               id="filterbar-tempf"
               aria-label={t('Cache Folder')}
               title={t('Cache Folder')}
-              onClick={() =>
-                void window.popcorn?.invoke('files:openDirectory', { target: 'cache' })
-              }
+              onClick={() => void popcorn().invoke('files:openDirectory', { target: 'cache' })}
             >
               <i className="fa fa-box-archive about" />
             </button>

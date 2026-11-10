@@ -31,3 +31,13 @@ export const FetchResult = Schema.Struct({
   hasMore: Schema.Boolean,
 })
 export type FetchResult = Schema.Schema.Type<typeof FetchResult>
+
+/** Genre/sorter/type options a provider reports for the filter bar. */
+export const ProviderFilters = Schema.Struct({
+  genres: Schema.Record({ key: Schema.String, value: Schema.String }),
+  sorters: Schema.Record({ key: Schema.String, value: Schema.String }),
+  kinds: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+  types: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+  ratings: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+})
+export type ProviderFilters = Schema.Schema.Type<typeof ProviderFilters>

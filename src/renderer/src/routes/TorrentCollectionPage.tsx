@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { IpcResponse } from '../../../shared/ipc'
+import { popcorn } from '../bridge'
 import { notify } from '../notify'
 
 type SavedTorrent = IpcResponse<'collection:list'>[number]
@@ -30,8 +31,7 @@ function useOnlineSearch() {
   const engines = useQuery({
     queryKey: ['search-engines'],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return []
+      const bridge = popcorn()
       const settings = await bridge.invoke('settings:all', {})
       const record = settings as Record<string, unknown>
       return [
@@ -45,15 +45,14 @@ function useOnlineSearch() {
     queryKey: ['search-results', query, category],
     enabled: query !== '',
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return { results: [], counts: {}, failures: [] }
+      const bridge = popcorn()
       return bridge.invoke('search:torrents', { query, category })
     },
   })
 
   const toggle = useMutation({
     mutationFn: async ({ key, enabled }: { key: string; enabled: boolean }) => {
-      await window.popcorn?.invoke('settings:set', { key, value: enabled })
+      await popcorn().invoke('settings:set', { key, value: enabled })
     },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['search-engines'] })
@@ -76,8 +75,7 @@ export function TorrentCollectionPage() {
   const items = useQuery({
     queryKey: ['collection'],
     queryFn: async (): Promise<ReadonlyArray<SavedTorrent>> => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return []
+      const bridge = popcorn()
       return bridge.invoke('collection:list', {})
     },
   })
@@ -88,7 +86,7 @@ export function TorrentCollectionPage() {
 
   const add = useMutation({
     mutationFn: async ({ name, source }: { name: string; source: string }) => {
-      await window.popcorn?.invoke('collection:add', { name, source })
+      await popcorn().invoke('collection:add', { name, source })
     },
     onSuccess: () => {
       setMagnet('')
@@ -99,21 +97,21 @@ export function TorrentCollectionPage() {
 
   const importFile = useMutation({
     mutationFn: async () => {
-      await window.popcorn?.invoke('collection:import', {})
+      await popcorn().invoke('collection:import', {})
     },
     onSuccess: refresh,
   })
 
   const remove = useMutation({
     mutationFn: async (id: number) => {
-      await window.popcorn?.invoke('collection:remove', { id })
+      await popcorn().invoke('collection:remove', { id })
     },
     onSuccess: refresh,
   })
 
   const rename = useMutation({
     mutationFn: async ({ id, name }: { id: number; name: string }) => {
-      await window.popcorn?.invoke('collection:rename', { id, name })
+      await popcorn().invoke('collection:rename', { id, name })
     },
     onSuccess: () => {
       setRenaming(undefined)

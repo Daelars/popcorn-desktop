@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { Effect, ManagedRuntime, Schedule, Stream } from 'effect'
 import { app, BrowserWindow, ipcMain, screen, session, shell } from 'electron'
 import { makeAppLayer } from './app'
-import { registerIpc } from './ipc'
+import { createEventPublisher, registerIpc } from './ipc'
 import { resolveLegacyProfileRoot } from './migration'
 import { type SettingsEnvironment, SettingsService } from './settings'
 import { StreamManager } from './streams'
@@ -11,6 +11,13 @@ import { createAutoUpdaterPort, UpdatesService } from './updates'
 import { zoomLevelFor } from './window'
 
 const RELEASE_NAME = 'Now.. Bring me that Horizon'
+
+/** The one push-event sender; every `webContents.send` in the process goes through it. */
+const publisher = createEventPublisher((channel, payload) => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(channel, payload)
+  }
+})
 
 // The play smoke test is driven from outside over CDP, which needs a debugging port;
 // POPCORN_CDP opens the same port without the smoke drive, for interactive probing.
@@ -107,7 +114,7 @@ function sendOpenTarget(target: string): void {
   }
   if (window.isMinimized()) window.restore()
   window.focus()
-  window.webContents.send('window:openFile', target)
+  publisher.publish('window:openFile', target)
 }
 
 function createWindow(frame: boolean): BrowserWindow {
@@ -156,7 +163,7 @@ function createWindow(frame: boolean): BrowserWindow {
   window.webContents.once('did-finish-load', () => {
     const target = pendingOpenTarget
     pendingOpenTarget = undefined
-    if (target !== undefined) window.webContents.send('window:openFile', target)
+    if (target !== undefined) publisher.publish('window:openFile', target)
   })
 
   return window
@@ -188,9 +195,7 @@ function startApp() {
         ? createAutoUpdaterPort()
         : undefined,
     publishUpdate: (status) => {
-      for (const window of BrowserWindow.getAllWindows()) {
-        window.webContents.send('updates:status', status)
-      }
+      publisher.publish('updates:status', status)
     },
     onMigrationError: (error) => {
       console.error('[migration] failed; continuing with an empty database', error)
@@ -200,16 +205,11 @@ function startApp() {
   const runtime = ManagedRuntime.make(layer)
   registerIpc(ipcMain, runtime)
 
-  // Forward each session's progress to every window.
+  // Forward each session's progress to every window through the typed publisher.
   runtime.runFork(
     Stream.runForEach(
       Stream.unwrap(Effect.map(StreamManager, (manager) => manager.progress)),
-      (progress) =>
-        Effect.sync(() => {
-          for (const window of BrowserWindow.getAllWindows()) {
-            window.webContents.send('streams:progress', progress)
-          }
-        }),
+      (progress) => Effect.sync(() => publisher.publish('streams:progress', progress)),
     ),
   )
 

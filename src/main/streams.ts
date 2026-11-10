@@ -1,6 +1,7 @@
 import { Context, Effect, Exit, Layer, PubSub, Ref, Scope, Stream } from 'effect'
 import { TorrentError } from '../shared/errors'
-import type { TorrentHandle, TorrentProbe, TorrentProgress, TorrentStatus } from './torrent'
+import type { IpcEventPayload } from '../shared/ipc'
+import type { TorrentHandle, TorrentProbe, TorrentStatus } from './torrent'
 import { type StreamRequest, TorrentService } from './torrent'
 
 export interface StreamHandle {
@@ -39,8 +40,8 @@ export interface StreamManagerShape {
   readonly list: Effect.Effect<ReadonlyArray<TorrentSummary>>
   readonly pause: (infoHash: string) => Effect.Effect<void>
   readonly resume: (infoHash: string) => Effect.Effect<void>
-  /** Progress for every live session, published for the renderer event channel. */
-  readonly progress: Stream.Stream<TorrentProgress>
+  /** Progress for every live session, tagged with its info hash for the renderer event. */
+  readonly progress: Stream.Stream<IpcEventPayload<'streams:progress'>>
 }
 
 export class StreamManager extends Context.Tag('StreamManager')<
@@ -57,7 +58,7 @@ export const StreamManagerLive = Layer.scoped(
   Effect.gen(function* () {
     const torrents = yield* TorrentService
     const sessions = yield* Ref.make(new Map<number, Session>())
-    const events = yield* PubSub.unbounded<TorrentProgress>()
+    const events = yield* PubSub.unbounded<IpcEventPayload<'streams:progress'>>()
 
     const sessionsFor = (
       current: ReadonlyMap<number, Session>,
@@ -78,6 +79,7 @@ export const StreamManagerLive = Layer.scoped(
           }),
         )
         yield* session.progress.pipe(
+          Stream.map((progress) => ({ ...progress, infoHash: session.infoHash })),
           Stream.runForEach((progress) => PubSub.publish(events, progress)),
           Effect.forkIn(scope),
         )

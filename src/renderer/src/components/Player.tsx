@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { IpcEventPayload } from '../../../shared/ipc'
+import { popcorn } from '../bridge'
 import { fileSize } from '../format'
 import { type PlayerKeyActions, usePlayerKeys } from '../hooks/usePlayerKeys'
 import {
@@ -311,7 +312,7 @@ export function Player({
       dragging = null
       target.releasePointerCapture(event.pointerId)
       if (target.style.top !== '') {
-        void window.popcorn?.invoke('settings:set', {
+        void popcorn().invoke('settings:set', {
           key: 'playerSubPosition',
           value: target.style.top,
         })
@@ -361,15 +362,15 @@ export function Player({
       if (!isTrailer && Number.isFinite(duration) && duration > 0 && Number.isFinite(current)) {
         const live = liveSettings.current
         const writeSetting = (key: string, value: unknown) => {
-          void window.popcorn?.invoke('settings:set', { key, value } as never)
+          void popcorn().invoke('settings:set', { key, value } as never)
         }
         if (current / duration >= 0.8) {
           writeSetting('lastWatchedTime', false)
           if (live.media?.imdbId !== undefined) {
             if (live.media.tvdbId === undefined) {
-              void window.popcorn?.invoke('watched:markMovie', { imdbId: live.media.imdbId })
+              void popcorn().invoke('watched:markMovie', { imdbId: live.media.imdbId })
             } else {
-              void window.popcorn?.invoke('watched:markEpisode', {
+              void popcorn().invoke('watched:markEpisode', {
                 tvdbId: live.media.tvdbId,
                 imdbId: live.media.imdbId,
                 season: live.media.season ?? '',
@@ -414,8 +415,7 @@ export function Player({
   }, [subtitleSettings])
 
   useEffect(() => {
-    const bridge = window.popcorn
-    if (bridge === undefined) return
+    const bridge = popcorn()
     return bridge.onProgress(setProgress)
   }, [])
 
@@ -575,7 +575,7 @@ export function Player({
       scaleWindow: (scale) => {
         const video = document.querySelector<HTMLVideoElement>('.vjs-tech')
         if (video === null || video.videoWidth === 0) return
-        void window.popcorn?.invoke('window:setSize', {
+        void popcorn().invoke('window:setSize', {
           width: Math.round(video.videoWidth * scale),
           height: Math.round(video.videoHeight * scale),
         })

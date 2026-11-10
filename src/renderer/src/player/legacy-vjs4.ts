@@ -1,3 +1,4 @@
+import { popcorn } from '../bridge'
 import videojs from './videojs'
 
 /**
@@ -352,7 +353,7 @@ function installPlayerHooks(): void {
       this.cache_.volume = volume
       this.techCall('setVolume', volume)
       window.localStorage.setItem('volume', String(volume))
-      void window.popcorn?.invoke('settings:set', { key: 'playerVolume', value: volume.toFixed(2) })
+      void popcorn().invoke('settings:set', { key: 'playerVolume', value: volume.toFixed(2) })
       return this
     }
     const volume = Number.parseFloat(String(this.techGet('volume')))

@@ -3,6 +3,7 @@ import { type ReactNode, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { SettingsKey } from '../../../shared/settings'
+import { popcorn } from '../bridge'
 import { changeLanguage, languages } from '../i18n'
 import { notify } from '../notify'
 import { useSettings } from '../settings'
@@ -160,8 +161,7 @@ function useUpdate(): { update: Update; saved: boolean } {
   const timer = useRef<number | undefined>(undefined)
   const mutation = useMutation({
     mutationFn: async ({ key, value }: { key: SettingsKey; value: unknown }) => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return
+      const bridge = popcorn()
       await bridge.invoke('settings:set', { key, value })
     },
     onSuccess: () => {
@@ -369,7 +369,7 @@ function OpenFolder({
       className={`open-folder ${icons[target]}`}
       aria-label={label}
       title={label}
-      onClick={() => void window.popcorn?.invoke('files:openDirectory', { target })}
+      onClick={() => void popcorn().invoke('files:openDirectory', { target })}
     />
   )
 }

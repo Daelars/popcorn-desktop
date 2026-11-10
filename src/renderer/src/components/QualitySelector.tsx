@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Torrent, TorrentsByQuality } from '../../../shared'
+import { popcorn } from '../bridge'
 import { fileSize } from '../format'
 import { useSetting } from '../settings'
 
@@ -40,7 +41,7 @@ export function QualitySelector({
   const apply = (quality: string, torrent: Torrent, persist: boolean) => {
     setActive(quality)
     if (persist) {
-      void window.popcorn?.invoke('settings:set', { key: defaultQualityKey, value: quality })
+      void popcorn().invoke('settings:set', { key: defaultQualityKey, value: quality })
     }
     onSelect(quality, torrent)
   }

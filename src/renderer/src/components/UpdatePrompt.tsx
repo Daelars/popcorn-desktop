@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { popcorn } from '../bridge'
 import { notify, notifyAction } from '../notify'
 import { useSetting } from '../settings'
 import { consumeManualCheck } from '../updates'
@@ -19,8 +20,7 @@ export function UpdatePrompt() {
   tRef.current = t
 
   useEffect(() => {
-    const bridge = window.popcorn
-    if (bridge === undefined) return
+    const bridge = popcorn()
     return bridge.onUpdateStatus((status) => {
       const translate = tRef.current
       switch (status.state) {

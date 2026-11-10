@@ -1,8 +1,9 @@
 ﻿import { Readable } from 'node:stream'
-import { Effect, Fiber, Layer, ManagedRuntime, Stream } from 'effect'
+import { Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from 'effect'
 import { describe, expect, it } from 'vitest'
 import { StreamManager, StreamManagerLive } from '../src/main/streams'
 import { type StreamSession, type TorrentHandle, TorrentService } from '../src/main/torrent'
+import { events } from '../src/shared/ipc'
 
 type Emit = (progress: {
   downloaded: number
@@ -171,7 +172,15 @@ describe('StreamManager', () => {
           yield* Effect.sleep('10 millis')
           yield* manager.start(request)
           yield* Effect.sleep('10 millis')
-          service.state.emit({ downloaded: 1, uploaded: 0, speed: 2, peers: 3, progress: 0.5 })
+          service.state.emit({
+            downloaded: 1,
+            uploaded: 0,
+            speed: 2,
+            peers: 3,
+            progress: 0.5,
+            length: 100,
+            timeRemaining: 5000,
+          })
           return yield* Fiber.join(fiber)
         }),
       ),
@@ -179,11 +188,16 @@ describe('StreamManager', () => {
     expect(progress._tag).toBe('Some')
     if (progress._tag === 'Some') {
       expect(progress.value).toMatchObject({
+        infoHash: 'hash-1',
         downloaded: 1,
         uploaded: 0,
         speed: 2,
         peers: 3,
         progress: 0.5,
+      })
+      // The preload bridge decodes with this schema; an untagged payload used to throw here.
+      expect(Schema.decodeUnknownSync(events['streams:progress'])(progress.value)).toMatchObject({
+        infoHash: 'hash-1',
       })
     }
     await runtime.dispose()

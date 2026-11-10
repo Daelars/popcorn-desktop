@@ -307,11 +307,11 @@ describe('registerIpc', () => {
 })
 
 describe('createEventPublisher', () => {
-  it('sends progress on the event channel', () => {
+  it('sends every push event through one typed entry point', () => {
     const sent: Array<{ channel: string; payload: unknown }> = []
     const publisher = createEventPublisher((channel, payload) => sent.push({ channel, payload }))
 
-    publisher.publishProgress({
+    publisher.publish('streams:progress', {
       infoHash: 'abc',
       downloaded: 1,
       uploaded: 2,
@@ -321,6 +321,8 @@ describe('createEventPublisher', () => {
       length: 100,
       timeRemaining: 5000,
     })
+    publisher.publish('window:openFile', 'magnet:?xt=urn:btih:abc')
+    publisher.publish('updates:status', { state: 'checking' })
 
     expect(sent).toEqual([
       {
@@ -336,6 +338,8 @@ describe('createEventPublisher', () => {
           timeRemaining: 5000,
         },
       },
+      { channel: 'window:openFile', payload: 'magnet:?xt=urn:btih:abc' },
+      { channel: 'updates:status', payload: { state: 'checking' } },
     ])
   })
 })

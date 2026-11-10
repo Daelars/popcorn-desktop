@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router'
+import { popcorn } from './bridge'
 import { FilterBar } from './components/FilterBar'
 import { HeaderBar } from './components/HeaderBar'
 import { Initializing } from './components/Initializing'
@@ -132,7 +133,7 @@ function Shell({ nativeFrame, isWindows }: { nativeFrame: boolean; isWindows: bo
       setDragging(false)
       const dropped = event.dataTransfer?.files[0]
       if (dropped !== undefined) {
-        const path = window.popcorn.pathForFile(dropped)
+        const path = popcorn().pathForFile(dropped)
         const extension = path.slice(path.lastIndexOf('.')).toLowerCase()
         if (VIDEO_EXTENSIONS.includes(extension)) {
           navigate(`/player?local=${encodeURIComponent(path)}`)
@@ -146,7 +147,7 @@ function Shell({ nativeFrame, isWindows }: { nativeFrame: boolean; isWindows: bo
         if (SUBTITLE_EXTENSIONS.includes(extension)) {
           // `videojs:drop_sub` served the dropped subtitle to the player; the Player adds
           // it to the running instance without restarting playback.
-          void window.popcorn
+          void popcorn()
             .invoke('local:subtitle', { path, origin: window.location.origin })
             .then((track) => {
               window.dispatchEvent(new CustomEvent('popcorn:subtitle', { detail: track }))
@@ -180,8 +181,7 @@ function Shell({ nativeFrame, isWindows }: { nativeFrame: boolean; isWindows: bo
 
   // `nw.App.on('open')` / `nw.App.argv`: the OS asked the app to open a file or link.
   useEffect(() => {
-    const bridge = window.popcorn
-    if (bridge === undefined) return
+    const bridge = popcorn()
     return bridge.onOpenFile((target) => {
       const extension = target.slice(target.lastIndexOf('.')).toLowerCase()
       if (VIDEO_EXTENSIONS.includes(extension)) {

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import type { IpcResponse } from '../../../shared/ipc'
+import { popcorn } from '../bridge'
 
 type ExternalPlayer = IpcResponse<'players:list'>[number]
 
@@ -26,16 +27,14 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
   const players = useQuery({
     queryKey: ['players'],
     queryFn: async (): Promise<ReadonlyArray<ExternalPlayer>> => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return []
+      const bridge = popcorn()
       return bridge.invoke('players:list', {})
     },
   })
 
   const play = useMutation({
     mutationFn: async (player: ExternalPlayer) => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return
+      const bridge = popcorn()
       const session = await bridge.invoke('stream:start', {
         torrentId: source,
         fileIndex,
@@ -51,7 +50,7 @@ export function ExternalPlayerPanel({ source, title, fileIndex }: ExternalPlayer
     const port = sessionPort.current
     sessionPort.current = undefined
     if (port !== undefined) {
-      void window.popcorn?.invoke('stream:stop', { port })
+      void popcorn().invoke('stream:stop', { port })
     }
     setStreamingTo(undefined)
   }

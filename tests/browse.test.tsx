@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, it } from 'vitest'
 import { useBrowse } from '../src/renderer/src/browse'
 import type { Filters } from '../src/shared'
-import type { PopcornBridge } from '../src/shared/ipc'
+import { createBridge, type IpcTransport } from '../src/shared/bridge'
 
 const movie = {
   type: 'movie',
@@ -39,12 +39,14 @@ function Harness({ provider, filters }: { provider: string; filters: Filters }) 
   )
 }
 
+/** The real bridge validates the response, so a malformed page rejects the query. */
 function stubBridge(result: unknown) {
-  const bridge = {
-    invoke: async () => result,
-    onProgress: () => () => undefined,
-  } as unknown as PopcornBridge
-  Object.defineProperty(window, 'popcorn', { value: bridge, configurable: true })
+  const transport: IpcTransport = {
+    invoke: async () => ({ ok: true, value: result }),
+    on: () => () => undefined,
+    pathForFile: (file) => `/dropped/${String(file)}`,
+  }
+  Object.defineProperty(window, 'popcorn', { value: createBridge(transport), configurable: true })
 }
 
 function renderHarness() {

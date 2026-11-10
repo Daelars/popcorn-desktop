@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { popcorn } from '../bridge'
 import { useSettings } from '../settings'
 
 /**
@@ -15,15 +16,14 @@ export function DisclaimerPage() {
   const status = useQuery({
     queryKey: ['disclaimer'],
     queryFn: async () => {
-      const bridge = window.popcorn
-      if (bridge === undefined) return { accepted: true }
+      const bridge = popcorn()
       return bridge.invoke('disclaimer:status', {})
     },
   })
 
   const accept = useMutation({
     mutationFn: async () => {
-      await window.popcorn?.invoke('disclaimer:accept', {})
+      await popcorn().invoke('disclaimer:accept', {})
     },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['disclaimer'] })
@@ -99,7 +99,7 @@ export function DisclaimerPage() {
             <button
               type="button"
               className="btn-close"
-              onClick={() => void window.popcorn?.invoke('window:close', {})}
+              onClick={() => void popcorn().invoke('window:close', {})}
             >
               {t('Leave')}
             </button>
