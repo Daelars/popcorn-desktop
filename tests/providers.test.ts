@@ -1,9 +1,12 @@
 import { Schema } from 'effect'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MovieApi } from '../src/main/providers/movie'
+import { NYAA_ANIME_CONFIG, NyaaAnimeApi } from '../src/main/providers/nyaa'
+import { TpbBrowseApi } from '../src/main/providers/piratebay'
 import { createRegistry } from '../src/main/providers/registry'
+import { TmdbBrowseApi } from '../src/main/providers/tmdb'
 import { YtsApi } from '../src/main/providers/yts'
-import { Movie } from '../src/shared'
+import { Movie, SORT_KEYS } from '../src/shared'
 
 const rawMovie = {
   imdb_id: 'tt0111161',
@@ -111,6 +114,26 @@ describe('registry', () => {
     expect(entries[1]?.descriptor.noShowAll).toBe(true)
   })
 
+  it('declares capabilities and only known sort keys', () => {
+    const entries = createRegistry({
+      apiUrls: {
+        movies: 'https://api.test/',
+        tv: 'https://tv.test/',
+        anime: 'https://anime.test/',
+      },
+      tmdbKey: 'key',
+      language: 'en',
+      contentLanguage: 'en',
+      contentLangOnly: false,
+    })
+    expect(entries.length).toBeGreaterThan(0)
+    for (const entry of entries) {
+      const capabilities = entry.descriptor.capabilities
+      expect(typeof capabilities.search).toBe('boolean')
+      for (const key of capabilities.sort) expect(SORT_KEYS).toContain(key)
+    }
+  })
+
   it('omits providers without a configured URL', () => {
     const entries = createRegistry({
       apiUrls: { movies: 'https://api.test/' },
@@ -119,5 +142,43 @@ describe('registry', () => {
       contentLangOnly: false,
     })
     expect(entries.map((entry) => entry.id)).toEqual(['movies', 'tpbtv', 'anime'])
+  })
+})
+
+describe('provider adapters', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('declares only known sort keys and capabilities across every adapter', async () => {
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = String(input)
+      return {
+        ok: true,
+        json: async () =>
+          url.includes('/genre/') ? { genres: [] } : { page: 1, total_pages: 1, results: [] },
+      }
+    })
+    const tmdb = new TmdbBrowseApi(
+      { name: 'TmdbMovies', uniqueId: 'imdb_id', tabName: 'Movies', type: 'movie' },
+      { tmdbKey: 'key' },
+    )
+    const tpb = new TpbBrowseApi({
+      name: 'TPBBrowse',
+      uniqueId: 'imdb_id',
+      tabName: 'Movies',
+      type: 'movie',
+    })
+    const nyaa = new NyaaAnimeApi(NYAA_ANIME_CONFIG, {
+      language: 'en',
+      contentLanguage: 'en',
+      contentLangOnly: false,
+    })
+
+    for (const provider of [tmdb, tpb, nyaa]) {
+      const filters = await provider.formatFilters()
+      expect(Object.keys(filters.sorters).length).toBeGreaterThan(0)
+      for (const key of Object.keys(filters.sorters)) expect(SORT_KEYS).toContain(key)
+      const capabilities = provider.toProvider().capabilities
+      for (const key of capabilities.sort) expect(SORT_KEYS).toContain(key)
+    }
   })
 })

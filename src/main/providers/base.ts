@@ -1,4 +1,4 @@
-import type { Filters, MediaItem, Provider } from '../../shared'
+import type { Capabilities, Filters, MediaItem, Provider, SortKey } from '../../shared'
 import { ProviderError } from '../../shared/errors'
 
 export const PROVIDER_ARG_TYPES = ['array', 'object', 'string', 'boolean', 'number'] as const
@@ -21,6 +21,15 @@ export interface ProviderConfig {
   readonly metadata?: string
   readonly noShowAll?: boolean
   readonly args?: Record<string, ProviderArgType>
+  /** What the provider can do; the UI reads this instead of the provider's name. */
+  readonly capabilities?: Capabilities
+}
+
+const DEFAULT_CAPABILITIES: Capabilities = {
+  search: true,
+  sort: [],
+  quality: false,
+  genres: false,
 }
 
 export interface ProviderPage<TItem> {
@@ -183,13 +192,15 @@ export abstract class BaseProvider<TItem extends MediaItem> {
       tabName: this.config.tabName,
       ...(this.config.metadata === undefined ? {} : { metadata: this.config.metadata }),
       ...(this.config.noShowAll === undefined ? {} : { noShowAll: this.config.noShowAll }),
+      capabilities: this.config.capabilities ?? DEFAULT_CAPABILITIES,
     }
   }
 }
 
 export interface ProviderFilters {
   readonly genres: Record<string, string>
-  readonly sorters: Record<string, string>
+  /** Keyed by the shared SortKey union, so a provider cannot declare an unknown sort. */
+  readonly sorters: Partial<Record<SortKey, string>>
   readonly kinds?: Record<string, string>
   readonly types?: Record<string, string>
   readonly ratings?: Record<string, string>

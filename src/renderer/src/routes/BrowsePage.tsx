@@ -19,23 +19,19 @@ export function BrowsePage({ title, type }: BrowsePageProps) {
   const [filters, setFilters] = useState<Filters>({ order: -1 })
   const providers = useProviders()
   const provider = providers.data?.find((candidate) => candidate.type === type)
-  const providerFilters = useProviderFilters(provider?.name)
+  // The tab, not the provider name, drives browse; the main process merges its providers.
+  const providerFilters = useProviderFilters(type)
   const posterWidth = useSetting('postersWidth').data ?? 134
   const sizeRatio = useSetting('postersSizeRatio').data ?? 196 / 134
   const showRating = useSetting('coversShowRating').data ?? true
   const library = useLibraryState()
-  const browse = useBrowse(provider?.name ?? '', filters)
+  const browse = useBrowse(type, filters)
   // Stable identity: the grid rebuilds its intersection observer when this changes.
   const loadMore = useCallback(() => void browse.fetchNextPage(), [browse.fetchNextPage])
 
   return (
     <div className="grid h-full grid-rows-[auto_1fr]">
-      <FilterBar
-        filters={filters}
-        onChange={setFilters}
-        options={providerFilters.data}
-        supportsQualityFilters={provider?.name === 'YTSApi'}
-      />
+      <FilterBar filters={filters} onChange={setFilters} options={providerFilters.data} />
       {providers.isPending || provider === undefined ? (
         <section className="grid place-items-center gap-1">
           <h2 className="text-lg text-Text3">{t(title)}</h2>

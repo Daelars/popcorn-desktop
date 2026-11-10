@@ -8,6 +8,7 @@ export const ANIME_API_CONFIG: ProviderConfig = {
   tabName: 'Anime',
   type: 'anime',
   metadata: 'trakttv:show-metadata',
+  capabilities: { search: true, sort: [], quality: true, genres: true },
 }
 
 function capitalizeEach(value: string): string {

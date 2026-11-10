@@ -1,5 +1,5 @@
 import type { Filters, Movie, Provider, Show } from '../../shared'
-import { BaseProvider, type ProviderConfig, type ProviderPage } from './base'
+import { BaseProvider, type ProviderConfig, type ProviderFilters, type ProviderPage } from './base'
 
 /**
  * The browse source for all three tabs. The legacy browse APIs are gone, so this reads
@@ -12,6 +12,12 @@ export const TMDB_MOVIE_CONFIG: ProviderConfig = {
   uniqueId: 'imdb_id',
   tabName: 'Movies',
   type: 'movie',
+  capabilities: {
+    search: true,
+    sort: ['popularity', 'rating', 'year'],
+    quality: false,
+    genres: true,
+  },
 }
 
 export const TMDB_SERIES_CONFIG: ProviderConfig = {
@@ -19,6 +25,12 @@ export const TMDB_SERIES_CONFIG: ProviderConfig = {
   uniqueId: 'imdb_id',
   tabName: 'Series',
   type: 'tvshow',
+  capabilities: {
+    search: true,
+    sort: ['popularity', 'rating', 'year'],
+    quality: false,
+    genres: true,
+  },
 }
 
 export const TMDB_ANIME_CONFIG: ProviderConfig = {
@@ -26,6 +38,12 @@ export const TMDB_ANIME_CONFIG: ProviderConfig = {
   uniqueId: 'imdb_id',
   tabName: 'Anime',
   type: 'anime',
+  capabilities: {
+    search: true,
+    sort: ['popularity', 'rating', 'year'],
+    quality: false,
+    genres: true,
+  },
 }
 
 const API = 'https://api.themoviedb.org/3'
@@ -230,17 +248,14 @@ export class TmdbBrowseApi extends BaseProvider<Movie> {
     return show as unknown as Movie
   }
 
-  async formatFilters(): Promise<{
-    genres: Record<string, string>
-    sorters: Record<string, string>
-  }> {
+  async formatFilters(): Promise<ProviderFilters> {
     const genres = await genresFor(this.kind, this.tmdbKey)
     return {
       genres: {
         All: 'All',
         ...Object.fromEntries([...genres].map(([id, name]) => [String(id), name])),
       },
-      sorters: { Trending: 'popularity', Rating: 'rating', Newest: 'year' },
+      sorters: { popularity: 'Trending', rating: 'Rating', year: 'Newest' },
     }
   }
 }

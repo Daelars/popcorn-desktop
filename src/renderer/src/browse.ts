@@ -1,12 +1,12 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import type { FetchResult, Filters, ProviderFilters } from '../../shared'
+import type { FetchResult, Filters, TabFilters } from '../../shared'
 import { popcorn } from './bridge'
 import { browseQueryKey } from './query'
 
 export type BrowseItem = FetchResult['results'][number]
 
-/** Filter options the filter bar reads; the shared `ProviderFilters` schema. */
-export type ProviderFilterOptions = ProviderFilters
+/** Filter options and capabilities the filter bar reads. */
+export type ProviderFilterOptions = TabFilters
 
 /** Providers the main process has registered, straight from the typed registry. */
 export function useProviders() {
@@ -17,32 +17,30 @@ export function useProviders() {
   })
 }
 
-/** Provider filter options, fetched once per provider. */
-export function useProviderFilters(provider: string | undefined) {
+/** The merged filter options and capabilities for a tab, fetched once. */
+export function useProviderFilters(tab: string | undefined) {
   return useQuery({
-    queryKey: ['provider-filters', provider ?? ''],
-    enabled: provider !== undefined,
-    queryFn: async (): Promise<ProviderFilters> => {
-      if (provider === undefined) throw new Error('no provider selected')
-      return popcorn().invoke('browse:filters', { provider })
+    queryKey: ['tab-filters', tab ?? ''],
+    enabled: tab !== undefined,
+    queryFn: async (): Promise<TabFilters> => {
+      if (tab === undefined) throw new Error('no tab selected')
+      return popcorn().invoke('browse:filters', { tab })
     },
     staleTime: Number.POSITIVE_INFINITY,
   })
 }
 
 /**
- * Infinite browse over the provider IPC channel. The response is validated against the shared
- * `FetchResult` schema at the bridge, so a malformed provider payload fails the query instead
- * of rendering an empty grid.
+ * Infinite browse over a tab. The main process merges the tab's providers by `imdb_id`, and
+ * the response is validated against the shared `FetchResult` schema at the bridge.
  */
-export function useBrowse(provider: string, filters: Filters) {
+export function useBrowse(tab: string, filters: Filters) {
   return useInfiniteQuery({
-    queryKey: browseQueryKey(provider, filters),
+    queryKey: browseQueryKey(tab, filters),
     initialPageParam: filters.page ?? 1,
-    // Providers load asynchronously; an empty name would fail with "unknown provider".
-    enabled: provider !== '',
+    enabled: tab !== '',
     queryFn: ({ pageParam }) =>
-      popcorn().invoke('browse:fetch', { provider, filters: { ...filters, page: pageParam } }),
+      popcorn().invoke('browse:fetch', { tab, filters: { ...filters, page: pageParam } }),
     getNextPageParam: (lastPage, _pages, lastPageParam) =>
       lastPage.hasMore ? lastPageParam + 1 : undefined,
   })

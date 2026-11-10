@@ -8,6 +8,7 @@ export const YTS_CONFIG: ProviderConfig = {
   type: 'movie',
   noShowAll: true,
   metadata: 'trakttv:movie-metadata',
+  capabilities: { search: true, sort: [], quality: true, genres: true },
 }
 
 export const YTS_TYPES = ['All', '720p', '1080p', '2160p', '3D'] as const

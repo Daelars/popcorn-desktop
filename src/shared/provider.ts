@@ -1,6 +1,28 @@
 import { Schema } from 'effect'
 import { MediaItem } from './media'
 
+/** The closed set of sort keys a provider may declare; an unknown key is a type error. */
+export const SortKey = Schema.Literal('popularity', 'rating', 'year', 'seeds', 'size', 'added')
+export type SortKey = Schema.Schema.Type<typeof SortKey>
+
+export const SORT_KEYS: ReadonlyArray<SortKey> = [
+  'popularity',
+  'rating',
+  'year',
+  'seeds',
+  'size',
+  'added',
+]
+
+/** What a provider can do, so the UI stops guessing from its display name. */
+export const Capabilities = Schema.Struct({
+  search: Schema.Boolean,
+  sort: Schema.Array(SortKey),
+  quality: Schema.Boolean,
+  genres: Schema.Boolean,
+})
+export type Capabilities = Schema.Schema.Type<typeof Capabilities>
+
 /** Descriptor for a registered provider — the typed replacement for `Provider#config`. */
 export const Provider = Schema.Struct({
   name: Schema.String,
@@ -9,6 +31,7 @@ export const Provider = Schema.Struct({
   tabName: Schema.String,
   metadata: Schema.optional(Schema.String),
   noShowAll: Schema.optional(Schema.Boolean),
+  capabilities: Capabilities,
 })
 export type Provider = Schema.Schema.Type<typeof Provider>
 
@@ -32,12 +55,13 @@ export const FetchResult = Schema.Struct({
 })
 export type FetchResult = Schema.Schema.Type<typeof FetchResult>
 
-/** Genre/sorter/type options a provider reports for the filter bar. */
-export const ProviderFilters = Schema.Struct({
+/** Genre/sorter/type options and capabilities a tab reports for the filter bar. */
+export const TabFilters = Schema.Struct({
   genres: Schema.Record({ key: Schema.String, value: Schema.String }),
   sorters: Schema.Record({ key: Schema.String, value: Schema.String }),
   kinds: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   types: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   ratings: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+  capabilities: Capabilities,
 })
-export type ProviderFilters = Schema.Schema.Type<typeof ProviderFilters>
+export type TabFilters = Schema.Schema.Type<typeof TabFilters>

@@ -1,5 +1,7 @@
 import type { Filters, Movie, Provider, Show } from '../../shared'
-import { BaseProvider, type ProviderConfig, type ProviderPage } from './base'
+import { BaseProvider, type ProviderConfig, type ProviderFilters, type ProviderPage } from './base'
+import { imdbIdOf, isPlayable, magnetOf, qualityOf, yearOf } from './release'
+import { tmdbMetadata, tmdbShowMetadata, withTmdb, withTmdbShow } from './tmdb-metadata'
 
 /**
  * A browse source that always has content: apibay's precompiled top-100 lists, which are
@@ -11,6 +13,7 @@ export const TPB_BROWSE_CONFIG: ProviderConfig = {
   uniqueId: 'imdb_id',
   tabName: 'Movies',
   type: 'movie',
+  capabilities: { search: true, sort: ['seeds', 'size', 'added'], quality: false, genres: false },
 }
 
 const TOP_LISTS = {
@@ -18,7 +21,7 @@ const TOP_LISTS = {
   tvshow: 'precompiled/data_top100_205.json',
 } as const
 
-interface ApibayItem {
+export interface ApibayItem {
   readonly id?: number
   readonly info_hash?: string
   readonly name?: string
@@ -30,32 +33,8 @@ interface ApibayItem {
   readonly category?: number
 }
 
-/** Chromium cannot decode HEVC, so those releases would never play. */
-const UNPLAYABLE = /\b(x265|h265|hevc)\b/i
-const QUALITY = /\b(2160p|1440p|1080p|720p|480p|360p)\b/i
-const YEAR = /\b(19\d{2}|20\d{2})\b/
 /** The legacy browse page size; the grid's load-more row counts in the same steps. */
 const PAGE_SIZE = 50
-
-function magnetOf(item: ApibayItem): string {
-  return `magnet:?xt=urn:btih:${item.info_hash ?? ''}&dn=${encodeURIComponent(item.name ?? '')}`
-}
-
-function qualityOf(name: string): string {
-  const match = QUALITY.exec(name)
-  return match?.[1]?.toLowerCase() ?? '1080p'
-}
-
-function yearOf(name: string): number {
-  const match = YEAR.exec(name)
-  return match?.[1] === undefined ? new Date().getFullYear() : Number(match[1])
-}
-
-function imdbIdOf(item: ApibayItem): string {
-  if (item.imdb?.startsWith('tt') === true) return item.imdb
-  // Items without an IMDb id still need a stable key for the cache and the detail route.
-  return `tt${String(item.info_hash ?? '').slice(0, 7)}`
-}
 
 function torrentOf(item: ApibayItem): Movie['torrents'][string] {
   const quality = qualityOf(item.name ?? '')
@@ -67,107 +46,6 @@ function torrentOf(item: ApibayItem): Movie['torrents'][string] {
     seed: Number(item.seeders ?? 0),
     peer: Number(item.leechers ?? 0),
     title: item.name ?? '',
-  }
-}
-
-interface TmdbMovie {
-  readonly poster_path?: string | null
-  readonly backdrop_path?: string | null
-  readonly overview?: string
-  readonly runtime?: number
-  readonly vote_average?: number
-  readonly release_date?: string
-  readonly genres?: ReadonlyArray<{ readonly name?: string }>
-  readonly imdb_id?: string
-}
-
-interface TmdbShow {
-  readonly id?: number
-  readonly name?: string
-  readonly poster_path?: string | null
-  readonly backdrop_path?: string | null
-  readonly overview?: string
-  readonly vote_average?: number
-  readonly first_air_date?: string
-  readonly genres?: ReadonlyArray<{ readonly name?: string }>
-  readonly external_ids?: { readonly tvdb_id?: number | null }
-}
-
-const IMAGE_BASE = 'https://image.tmdb.org/t/p'
-
-/** Artwork is stable per title, so one lookup per id lasts the process. */
-const metadataCache = new Map<string, TmdbMovie | undefined>()
-const showMetadataCache = new Map<string, TmdbShow | undefined>()
-
-/** TMDB fills in the artwork and synopsis apibay does not have; the key is the app's own. */
-async function tmdbMetadata(imdbId: string, apiKey: string): Promise<TmdbMovie | undefined> {
-  const cached = metadataCache.get(imdbId)
-  if (cached !== undefined) return cached
-  try {
-    const response = await fetch(
-      `https://api.themoviedb.org/3/movie/${imdbId}?api_key=${apiKey}&language=en`,
-    )
-    if (!response.ok) {
-      metadataCache.set(imdbId, undefined)
-      return undefined
-    }
-    const meta = (await response.json()) as TmdbMovie
-    metadataCache.set(imdbId, meta)
-    return meta
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * Shows need two TMDB calls: `/find` resolves the IMDb id to a TMDB id, and the details
- * call carries the artwork plus the real TVDB id (`external_ids`), which the watched
- * bookkeeping needs.
- */
-async function tmdbShowMetadata(imdbId: string, apiKey: string): Promise<TmdbShow | undefined> {
-  const cached = showMetadataCache.get(imdbId)
-  if (cached !== undefined) return cached
-  try {
-    const found = (await (
-      await fetch(
-        `https://api.themoviedb.org/3/find/${imdbId}?api_key=${apiKey}&external_source=imdb_id`,
-      )
-    ).json()) as { tv_results?: ReadonlyArray<{ id?: number }> }
-    const id = found.tv_results?.[0]?.id
-    if (id === undefined) {
-      showMetadataCache.set(imdbId, undefined)
-      return undefined
-    }
-    const response = await fetch(
-      `https://api.themoviedb.org/3/tv/${id}?api_key=${apiKey}&language=en&append_to_response=external_ids`,
-    )
-    if (!response.ok) {
-      showMetadataCache.set(imdbId, undefined)
-      return undefined
-    }
-    const meta = (await response.json()) as TmdbShow
-    showMetadataCache.set(imdbId, meta)
-    return meta
-  } catch {
-    return undefined
-  }
-}
-
-function withTmdb(movie: Movie, meta: TmdbMovie): Movie {
-  const poster = meta.poster_path == null ? undefined : `${IMAGE_BASE}/w300${meta.poster_path}`
-  const backdrop =
-    meta.backdrop_path == null ? undefined : `${IMAGE_BASE}/w1280${meta.backdrop_path}`
-  const year = meta.release_date === undefined ? undefined : Number(meta.release_date.slice(0, 4))
-  return {
-    ...movie,
-    title: movie.title,
-    year: Number.isFinite(year) ? (year as number) : movie.year,
-    genre: (meta.genres ?? []).flatMap((genre) => (genre.name === undefined ? [] : [genre.name])),
-    rating: meta.vote_average ?? movie.rating,
-    ...(meta.runtime === undefined ? {} : { runtime: meta.runtime }),
-    synopsis: meta.overview ?? movie.synopsis,
-    ...(poster === undefined ? {} : { poster, image: poster, poster_medium: poster }),
-    ...(backdrop === undefined ? {} : { backdrop }),
   }
 }
 
@@ -213,27 +91,6 @@ export function toShow(item: ApibayItem): Show {
   } as Show
 }
 
-function withTmdbShow(show: Show, meta: TmdbShow): Show {
-  const poster = meta.poster_path == null ? undefined : `${IMAGE_BASE}/w300${meta.poster_path}`
-  const backdrop =
-    meta.backdrop_path == null ? undefined : `${IMAGE_BASE}/w1280${meta.backdrop_path}`
-  const year =
-    meta.first_air_date === undefined ? undefined : Number(meta.first_air_date.slice(0, 4))
-  const tvdb = meta.external_ids?.tvdb_id ?? undefined
-  return {
-    ...show,
-    title: meta.name ?? show.title,
-    year: Number.isFinite(year) ? (year as number) : show.year,
-    genres: (meta.genres ?? []).flatMap((genre) => (genre.name === undefined ? [] : [genre.name])),
-    rating: { percentage: (meta.vote_average ?? 0) * 10 },
-    synopsis: meta.overview ?? show.synopsis,
-    ...(poster === undefined ? {} : { poster, images: { poster } }),
-    ...(backdrop === undefined ? {} : { backdrop }),
-    // The apibay id is not a TVDB id; a real one is only there when TMDB knows the show.
-    ...(tvdb === undefined ? {} : { tvdb_id: tvdb as Show['tvdb_id'] }),
-  }
-}
-
 export class TpbBrowseApi extends BaseProvider<Movie> {
   private readonly tmdbKey: string
 
@@ -254,7 +111,7 @@ export class TpbBrowseApi extends BaseProvider<Movie> {
     const list = this.config.type === 'tvshow' ? TOP_LISTS.tvshow : TOP_LISTS.movie
     const raw = (await this.get(0, list)) as ReadonlyArray<ApibayItem>
     const keywords = filters.keywords?.trim().toLowerCase() ?? ''
-    const playable = raw.filter((item) => !UNPLAYABLE.test(item.name ?? ''))
+    const playable = raw.filter((item) => isPlayable(item.name ?? ''))
     const matching =
       keywords === ''
         ? playable
@@ -323,13 +180,10 @@ export class TpbBrowseApi extends BaseProvider<Movie> {
     return { results: enriched, hasMore }
   }
 
-  async formatFilters(): Promise<{
-    genres: Record<string, string>
-    sorters: Record<string, string>
-  }> {
+  async formatFilters(): Promise<ProviderFilters> {
     return {
       genres: { All: 'All' },
-      sorters: { Trending: 'seeds', Size: 'size', Uploaded: 'added' },
+      sorters: { seeds: 'Trending', size: 'Size', added: 'Uploaded' },
     }
   }
 }

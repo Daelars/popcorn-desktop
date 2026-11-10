@@ -93,20 +93,20 @@ interface FilterBarProps {
   readonly filters?: Filters
   readonly onChange?: (filters: Filters) => void
   readonly options?: ProviderFilterOptions | undefined
-  /** YTS adds quality and rating filters on top of the common set. */
-  readonly supportsQualityFilters?: boolean
 }
 
 /** The legacy filter bar: source tabs on the left, filters in the middle, search and icons right. */
-export function FilterBar({
-  filters,
-  onChange,
-  options,
-  supportsQualityFilters = false,
-}: FilterBarProps) {
+export function FilterBar({ filters, onChange, options }: FilterBarProps) {
   const { t } = useTranslation()
+  const capabilities = options?.capabilities
   const genres = options?.genres ?? { All: t('All') }
   const sorters = options?.sorters ?? {}
+  // Capabilities, not provider names, decide what the bar shows.
+  const showGenres = capabilities?.genres ?? true
+  const showQuality = capabilities?.quality ?? false
+  const showSort =
+    capabilities === undefined ? Object.keys(sorters).length > 0 : capabilities.sort.length > 0
+  const showSearch = capabilities?.search ?? true
   const cacheButton = useSetting('activateTempf').data ?? true
   const expandedSearch = useSetting('expandedSearch').data ?? false
   const searchInput = useRef<HTMLInputElement>(null)
@@ -127,7 +127,7 @@ export function FilterBar({
 
       {filters !== undefined && onChange !== undefined ? (
         <ul id="nav-filters" className="nav nav-hor filters">
-          {supportsQualityFilters && options?.types !== undefined ? (
+          {showQuality && options?.types !== undefined ? (
             <FilterDropdown
               className="types"
               label={t('Type')}
@@ -136,7 +136,7 @@ export function FilterBar({
               onSelect={(type) => onChange({ ...filters, type })}
             />
           ) : null}
-          {supportsQualityFilters && options?.ratings !== undefined ? (
+          {showQuality && options?.ratings !== undefined ? (
             <FilterDropdown
               className="ratings"
               label={t('Rating')}
@@ -145,14 +145,16 @@ export function FilterBar({
               onSelect={(rating) => onChange({ ...filters, rating })}
             />
           ) : null}
-          <FilterDropdown
-            className="genres"
-            label={t('Genre')}
-            value={filters.genre ?? 'All'}
-            entries={genres}
-            onSelect={(genre) => onChange({ ...filters, genre })}
-          />
-          {Object.keys(sorters).length > 0 ? (
+          {showGenres ? (
+            <FilterDropdown
+              className="genres"
+              label={t('Genre')}
+              value={filters.genre ?? 'All'}
+              entries={genres}
+              onSelect={(genre) => onChange({ ...filters, genre })}
+            />
+          ) : null}
+          {showSort ? (
             <FilterDropdown
               className="sorters"
               label={t('Sort by')}
@@ -165,42 +167,44 @@ export function FilterBar({
       ) : null}
 
       <ul className="nav nav-hor right">
-        <li>
-          <div className="right search" onClick={() => searchInput.current?.focus()}>
-            <form
-              className={searchText === '' ? undefined : 'edited'}
-              onSubmit={(event) => {
-                event.preventDefault()
-                // `filter_bar.js:search` applied the keywords on submit and reset the genre.
-                onChange?.({ ...(filters ?? {}), keywords: searchText, genre: '' })
-                searchInput.current?.blur()
-              }}
-            >
-              <input
-                id="searchbox"
-                ref={searchInput}
-                className={expandedSearch ? 'expanded' : undefined}
-                type="text"
-                placeholder={t('Search')}
-                autoComplete="off"
-                aria-label={t('Search')}
-                value={searchText}
-                onChange={(event) => setSearchText(event.target.value)}
-                // `filter_bar.js` also focused the input on hover.
-                onMouseEnter={() => searchInput.current?.focus()}
-              />
-              {/* `filter-bar.tpl` uses an FA div here; it only shows once the form is `edited`. */}
-              <div
-                className="clear fa fa-times"
-                onClick={() => {
-                  setSearchText('')
-                  onChange?.({ ...(filters ?? {}), keywords: '', genre: '' })
-                  searchInput.current?.focus()
+        {showSearch ? (
+          <li>
+            <div className="right search" onClick={() => searchInput.current?.focus()}>
+              <form
+                className={searchText === '' ? undefined : 'edited'}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  // `filter_bar.js:search` applied the keywords on submit and reset the genre.
+                  onChange?.({ ...(filters ?? {}), keywords: searchText, genre: '' })
+                  searchInput.current?.blur()
                 }}
-              />
-            </form>
-          </div>
-        </li>
+              >
+                <input
+                  id="searchbox"
+                  ref={searchInput}
+                  className={expandedSearch ? 'expanded' : undefined}
+                  type="text"
+                  placeholder={t('Search')}
+                  autoComplete="off"
+                  aria-label={t('Search')}
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  // `filter_bar.js` also focused the input on hover.
+                  onMouseEnter={() => searchInput.current?.focus()}
+                />
+                {/* `filter-bar.tpl` uses an FA div here; it only shows once the form is `edited`. */}
+                <div
+                  className="clear fa fa-times"
+                  onClick={() => {
+                    setSearchText('')
+                    onChange?.({ ...(filters ?? {}), keywords: '', genre: '' })
+                    searchInput.current?.focus()
+                  }}
+                />
+              </form>
+            </div>
+          </li>
+        ) : null}
         <li>
           <NavLink
             id="filterbar-torrent-collection"

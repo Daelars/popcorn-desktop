@@ -7,6 +7,7 @@ export const TV_API_CONFIG: ProviderConfig = {
   tabName: 'TV Shows',
   type: 'tvshow',
   metadata: 'trakttv:show-metadata',
+  capabilities: { search: true, sort: [], quality: true, genres: true },
 }
 
 export interface RawEpisode {
