@@ -1,4 +1,4 @@
-﻿import { homedir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Effect, ManagedRuntime, Schedule, Stream } from 'effect'
 import { app, BrowserWindow, ipcMain, screen, session, shell } from 'electron'
@@ -8,7 +8,15 @@ import { resolveLegacyProfileRoot } from './migration'
 import { type SettingsEnvironment, SettingsService } from './settings'
 import { StreamSession } from './stream-session'
 import { createAutoUpdaterPort, UpdatesService } from './updates'
-import { zoomLevelFor } from './window'
+import {
+  applyWindowPreference,
+  installMinimizeToTray,
+  readWindowState,
+  resolveWindowPlacement,
+  windowStatePath,
+  writeWindowState,
+  zoomLevelFor,
+} from './window'
 
 const RELEASE_NAME = 'Now.. Bring me that Horizon'
 
@@ -117,18 +125,37 @@ function sendOpenTarget(target: string): void {
   publisher.publish('window:openFile', target)
 }
 
-function createWindow(frame: boolean): BrowserWindow {
+/** Everything a window needs at creation, read from settings before the Effect runs. */
+interface WindowPreferences {
+  readonly frame: boolean
+  readonly alwaysOnTop: boolean
+  readonly fullscreen: boolean
+  /** Omitted when Electron should place the window itself (the smoke harness). */
+  readonly bounds: {
+    readonly x?: number
+    readonly y?: number
+    readonly width: number
+    readonly height: number
+  }
+  readonly maximized: boolean
+  /** Live read of `minimizeToTray`; the minimize handler runs outside the Effect runtime. */
+  readonly minimizeToTray: () => boolean
+  readonly trayTooltip: string
+}
+
+function createWindow(preferences: WindowPreferences): BrowserWindow {
   applyContentSecurityPolicy()
   const window = new BrowserWindow({
-    width: 960,
-    height: 520,
+    ...preferences.bounds,
     minWidth: 960,
     minHeight: 520,
     show: false,
     autoHideMenuBar: true,
+    alwaysOnTop: preferences.alwaysOnTop,
+    fullscreen: preferences.fullscreen,
     // `nativeWindowFrame` chooses the OS frame; otherwise a custom titlebar is drawn.
-    frame,
-    ...(process.platform === 'darwin' && frame === false
+    frame: preferences.frame,
+    ...(process.platform === 'darwin' && preferences.frame === false
       ? { titleBarStyle: 'hiddenInset' as const }
       : {}),
     webPreferences: {
@@ -140,16 +167,19 @@ function createWindow(frame: boolean): BrowserWindow {
   })
 
   window.on('ready-to-show', () => {
-    window.show()
-  })
-
-  window.on('ready-to-show', () => {
+    // A window last closed maximised is restored after the first paint, as before.
+    if (preferences.maximized) window.maximize()
     window.show()
   })
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  installMinimizeToTray(window, {
+    enabled: preferences.minimizeToTray,
+    tooltip: preferences.trayTooltip,
   })
 
   const devServerUrl = process.env.ELECTRON_RENDERER_URL
@@ -219,6 +249,14 @@ function startApp() {
     ),
   )
 
+  // Window preferences Electron can apply live, pushed on every accepted write.
+  runtime.runFork(
+    Stream.runForEach(
+      Stream.unwrap(Effect.map(SettingsService, (settings) => settings.changes)),
+      (change) => Effect.sync(() => applyWindowPreference(change)),
+    ),
+  )
+
   return runtime
 }
 
@@ -238,17 +276,57 @@ const waitForLoad = (window: BrowserWindow): Effect.Effect<void> =>
  * renderer is ready, and the update check repeats every six hours on a scoped fiber that
  * the runtime interrupts on dispose.
  */
-function openWindow(): Effect.Effect<void, never, SettingsService | UpdatesService> {
+function openWindow(
+  readMinimizeToTray: () => boolean,
+): Effect.Effect<void, never, SettingsService | UpdatesService> {
   return Effect.gen(function* () {
     const settings = yield* SettingsService
     const frame = yield* settings.get('nativeWindowFrame')
     const zoom = yield* settings.get('bigPicture')
-    const window = yield* Effect.sync(() => createWindow(frame))
-    yield* Effect.sync(() => window.webContents.setZoomLevel(zoomLevelFor(zoom)))
+    const alwaysOnTop = yield* settings.get('alwaysOnTop')
+    const alwaysFullscreen = yield* settings.get('alwaysFullscreen')
+    const defaultWidth = yield* settings.get('defaultWidth')
+    const defaultHeight = yield* settings.get('defaultHeight')
+    const trayTooltip = yield* settings.get('projectName')
+
+    // The legacy `App.onBeforeStart` geometry, kept beside the database instead of localStorage.
+    const statePath = windowStatePath(app.getPath('userData'))
+    const display = screen.getPrimaryDisplay()
+    const placement = resolveWindowPlacement(
+      readWindowState(statePath),
+      {
+        workArea: display.workArea,
+        size: { width: display.bounds.width, height: display.bounds.height },
+      },
+      { width: defaultWidth, height: defaultHeight },
+    )
+
+    const window = createWindow({
+      frame,
+      alwaysOnTop,
+      fullscreen: alwaysFullscreen,
+      bounds: placement.bounds,
+      maximized: placement.maximized,
+      minimizeToTray: readMinimizeToTray,
+      trayTooltip,
+    })
+    window.webContents.setZoomLevel(zoomLevelFor(zoom))
+
+    // `getNormalBounds` ignores the maximised state, so it is the size to open at next time.
+    window.on('close', () => {
+      const bounds = window.getNormalBounds()
+      writeWindowState(statePath, {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        maximized: window.isMaximized(),
+      })
+    })
 
     // `nw.App.argv.pop()`: the first launch may carry a file or link to open.
     const target = openTarget(process.argv)
-    if (target !== undefined) yield* Effect.sync(() => sendOpenTarget(target))
+    if (target !== undefined) sendOpenTarget(target)
 
     yield* waitForLoad(window).pipe(
       Effect.zipRight(Effect.flatMap(UpdatesService, (updates) => updates.check(false))),
@@ -278,11 +356,22 @@ app.on('open-file', (event, path) => {
 void app.whenReady().then(async () => {
   if (!singleInstance) return
   const runtime = startApp()
+  // Read per minimize event, so toggling `minimizeToTray` applies without a restart.
+  const readMinimizeToTray = (): boolean =>
+    runtime.runSync(Effect.flatMap(SettingsService, (settings) => settings.get('minimizeToTray')))
 
   if (process.env.POPCORN_SMOKE_PLAY !== undefined) {
     // Loaded only when the smoke drive is requested; keeps the normal bundle out of it.
     const { smokePlay } = await import('./smoke')
-    const window = createWindow(false)
+    const window = createWindow({
+      frame: false,
+      alwaysOnTop: false,
+      fullscreen: false,
+      bounds: { width: 960, height: 520 },
+      maximized: false,
+      minimizeToTray: () => false,
+      trayTooltip: app.getName(),
+    })
     // Forward the renderer console and crash details; without them a dead renderer is silent.
     window.webContents.on('console-message', (event) => {
       const detail = event as unknown as { message?: string; lineNumber?: number }
@@ -310,10 +399,12 @@ void app.whenReady().then(async () => {
     return
   }
 
-  runtime.runFork(openWindow())
+  runtime.runFork(openWindow(readMinimizeToTray))
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) runtime.runFork(openWindow())
+    if (BrowserWindow.getAllWindows().length === 0) {
+      runtime.runFork(openWindow(readMinimizeToTray))
+    }
   })
 
   app.on('will-quit', () => {
