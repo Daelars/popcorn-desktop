@@ -1,3 +1,4 @@
+import placeholder from '../../../../resources/images/posterholder.png'
 import type { BrowseItem } from '../browse'
 
 export interface LibraryState {
@@ -11,6 +12,8 @@ interface PosterProps {
   readonly height: number
   readonly showRating: boolean
   readonly state: LibraryState
+  /** Keyboard/grid highlight: `item.js:hoverItem` selected the same `li`. */
+  readonly selected?: boolean
   readonly onOpen: (item: BrowseItem) => void
   readonly onToggleBookmark?: (item: BrowseItem) => void
 }
@@ -19,12 +22,19 @@ function ratingOf(item: BrowseItem): number {
   return item.type === 'movie' ? item.rating : item.rating.percentage / 10
 }
 
-function posterUrl(item: BrowseItem): string | undefined {
+/**
+ * The legacy `item.js:loadImage` chain, ending at `images/posterholder.png` when nothing
+ * else resolves. Always returns a URL so the cover never renders without a background.
+ */
+function posterUrl(item: BrowseItem): string {
   if (typeof item.poster === 'string' && item.poster.length > 0) return item.poster
-  if (item.type === 'movie' && typeof item.image === 'string' && item.image.length > 0)
-    return item.image
+  if (item.type === 'movie') {
+    if (typeof item.image === 'string' && item.image.length > 0) return item.image
+    if (typeof item.poster_medium === 'string' && item.poster_medium.length > 0)
+      return item.poster_medium
+  }
   if (item.type === 'show' && item.images?.poster !== undefined) return item.images.poster
-  return undefined
+  return placeholder
 }
 
 const STAR_SLOTS = [0, 1, 2, 3, 4] as const
@@ -53,7 +63,14 @@ export function RatingStars({ rating }: { rating: number }) {
 }
 
 /** One poster, in the legacy item template's markup so the ported view CSS applies. */
-export function Poster({ item, showRating, state, onOpen, onToggleBookmark }: PosterProps) {
+export function Poster({
+  item,
+  showRating,
+  state,
+  selected,
+  onOpen,
+  onToggleBookmark,
+}: PosterProps) {
   const poster = posterUrl(item)
   const rating = ratingOf(item)
   const quality =
@@ -61,11 +78,11 @@ export function Poster({ item, showRating, state, onOpen, onToggleBookmark }: Po
   const seasons = item.type === 'show' ? item.num_seasons : undefined
 
   return (
-    <li className={`item${state.watched ? ' watched' : ''}`}>
-      <div
-        className={`cover${poster === undefined ? '' : ' fadein'}`}
-        style={poster === undefined ? undefined : { backgroundImage: `url(${poster})` }}
-      >
+    <li
+      className={`item${state.watched ? ' watched' : ''}${selected === true ? ' selected' : ''}`}
+      data-imdb-id={item.imdb_id}
+    >
+      <div className="cover fadein" style={{ backgroundImage: `url(${poster})` }}>
         <a
           className="cover-link"
           href={`#/detail/${item.imdb_id}`}
