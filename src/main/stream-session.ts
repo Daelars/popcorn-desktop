@@ -3,6 +3,7 @@ import { Context, Effect, Exit, Layer, PubSub, Ref, Scope, Stream, SubscriptionR
 import { TorrentError } from '../shared/errors'
 import type { IpcEventPayload, StreamState } from '../shared/ipc'
 import { serveFile } from './file-server'
+import { SubtitlesService } from './subtitles/service'
 import {
   readTorrentSource,
   TorrentEngine,
@@ -28,6 +29,10 @@ export interface OpenRequest {
   /** Season and episode to match when no explicit index is given. */
   readonly season?: string
   readonly episode?: string
+  /** The title's IMDb id, when the renderer knows it; enables the subtitle step. */
+  readonly imdbId?: string
+  /** The provider subtitle language picked on the detail page; empty uses the setting. */
+  readonly subtitleLang?: string
   readonly downloadPath: string
   /** 0 or omitted picks an ephemeral port. */
   readonly port?: number
@@ -137,6 +142,7 @@ export const StreamSessionLive = Layer.scoped(
   StreamSession,
   Effect.gen(function* () {
     const engine = yield* TorrentEngine
+    const subtitles = yield* SubtitlesService
     const layerScope = yield* Effect.scope
     const sessions = yield* Ref.make(new Map<string, Session>())
     const stateBus = yield* PubSub.unbounded<StreamState>()
@@ -170,6 +176,26 @@ export const StreamSessionLive = Layer.scoped(
           })
         }
       })
+
+    /** The legacy `waitingForSubtitles` step: no imdb id or no language means play without. */
+    const subtitleUrl = (
+      request: OpenRequest,
+      file: TorrentFile,
+    ): Effect.Effect<string | undefined> => {
+      if (request.imdbId === undefined || request.imdbId === '') return Effect.succeed(undefined)
+      return subtitles
+        .fetch(request.imdbId, request.subtitleLang ?? '', request.origin, {
+          ...(request.season === undefined ? {} : { season: request.season }),
+          ...(request.episode === undefined ? {} : { episode: request.episode }),
+          fileSize: file.length,
+        })
+        .pipe(
+          Effect.map((track) => track.url),
+          // A subtitle that cannot be fetched in time must not stop playback.
+          Effect.timeout('10 seconds'),
+          Effect.catchAll(() => Effect.succeed(undefined)),
+        )
+    }
 
     const open: StreamSessionShape['open'] = (request) =>
       Effect.gen(function* () {
@@ -220,7 +246,16 @@ export const StreamSessionLive = Layer.scoped(
             port: request.port ?? 0,
             origin: request.origin,
           })
-          yield* patch(ref, { state: 'ready', url: served.url, port: served.port })
+          // The legacy order: the file is served, subtitles are fetched, then it is ready.
+          yield* patch(ref, { state: 'waitingForSubtitles', url: served.url, port: served.port })
+          yield* publish(yield* SubscriptionRef.get(ref))
+          const subtitle = yield* subtitleUrl(request, file)
+          yield* patch(ref, {
+            state: 'ready',
+            url: served.url,
+            port: served.port,
+            ...(subtitle === undefined ? {} : { subtitle }),
+          })
           yield* publish(yield* SubscriptionRef.get(ref))
 
           yield* handle.progress.pipe(

@@ -193,6 +193,9 @@ export const contracts = {
       fileHint: Schema.optional(Schema.String),
       season: Schema.optional(Schema.String),
       episode: Schema.optional(Schema.String),
+      /** The title's IMDb id and picked language; the subtitle step runs when it is known. */
+      imdbId: Schema.optional(Schema.String),
+      subtitleLang: Schema.optional(Schema.String),
       port: Schema.optional(Schema.Number),
       origin: Schema.String,
     }),
@@ -202,6 +205,8 @@ export const contracts = {
       infoHash: Schema.String,
       port: Schema.Number,
       url: Schema.String,
+      /** The served WebVTT url, when the subtitle step found one. */
+      subtitle: Schema.optional(Schema.String),
     }),
   },
   'stream:stop': {
@@ -367,6 +372,8 @@ export const StreamState = Schema.Struct({
   port: Schema.Number,
   /** The chosen file's name, once known. */
   name: Schema.optional(Schema.String),
+  /** The served WebVTT url, once the subtitle step finished. */
+  subtitle: Schema.optional(Schema.String),
   downloaded: Schema.Number,
   uploaded: Schema.Number,
   speed: Schema.Number,
