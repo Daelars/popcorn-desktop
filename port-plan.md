@@ -269,6 +269,23 @@ Phase 7 tickets have no blockers and can run in parallel. After Phase 8, the pla
 - **Speculative work.** 11.2 (Library) and all of Phase 13 carry `needs-triage`. A maintainer decides scope before an agent picks them up.
 - **Test files.** Most tickets can extend existing files (`tests/ipc.test.ts`, `streams.test.ts`, `settings.test.ts`, `providers.test.ts`, `migration.test.ts`, `PlayerPage.test.tsx`). Where a new module arguably deserves its own file (StreamSession, Playback rules, Catalog), the ticket asks for approval first, as `AGENTS.md` requires.
 
+### Inert-key audit (10.3)
+
+From 10.1's `INERT_SETTINGS` — every key the port does not read, with its disposition. None are
+deleted here; they are either tracked against an open ticket or removed from the UI by that
+ticket when the feature lands.
+
+| Key | Disposition |
+|---|---|
+| `httpApiEnabled`, `httpApiPort`, `httpApiUsername`, `httpApiPassword` | JSON-RPC decision — #23 |
+| `translateTitle`, `translateEpisodes`, `translateSynopsis`, `translatePosters` | Translation/Trakt work — #23 |
+| `alwaysOnTop`, `minimizeToTray` | Window lifecycle parity — #58 |
+| `dht`, `dhtInfo`, `dhtEnable` | Torrent/DHT parity — #57 |
+| `maxActiveTorrents`, `streamPort`, `continueSeedingOnStart`, `deleteTmpOnClose`, `delSeedboxCache`, `separateDownloadsDir` | Seedbox/downloads parity — #57 |
+| `toggleSengines` | Browse/search parity — #56 |
+| `activateLoCtrl` | Player controls parity — #59 |
+
+
 ## Decisions so far
 
 Also mirrored in #33:

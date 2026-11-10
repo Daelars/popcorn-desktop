@@ -6,6 +6,7 @@ import { HeaderBar } from './components/HeaderBar'
 import { Initializing } from './components/Initializing'
 import { TitleBar } from './components/TitleBar'
 import { UpdatePrompt } from './components/UpdatePrompt'
+import { changeLanguage } from './i18n'
 import { Notifications } from './notify'
 import { AboutPage } from './routes/AboutPage'
 import { BrowsePage } from './routes/BrowsePage'
@@ -255,11 +256,17 @@ function Shell({ nativeFrame, isWindows }: { nativeFrame: boolean; isWindows: bo
 export default function App() {
   const nativeFrame = useSetting('nativeWindowFrame').data ?? false
   const theme = useSetting('theme').data ?? defaultTheme
+  const language = useSetting('language').data
   const isWindows = navigator.userAgent.includes('Windows')
 
   useEffect(() => {
     applyTheme(theme)
   }, [theme])
+
+  // Live language: the setting drives i18n without a restart.
+  useEffect(() => {
+    if (language !== undefined && language !== '') void changeLanguage(language)
+  }, [language])
 
   return (
     <HashRouter>
