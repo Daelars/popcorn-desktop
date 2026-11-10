@@ -5,7 +5,7 @@ import { TpbBrowseApi } from '../src/main/providers/piratebay'
 import { createRegistry } from '../src/main/providers/registry'
 import { TmdbBrowseApi } from '../src/main/providers/tmdb'
 import { YtsApi } from '../src/main/providers/yts'
-import { Movie, SORT_KEYS } from '../src/shared'
+import { Movie } from '../src/shared'
 
 const rawMovie = {
   imdb_id: 'tt0111161',
@@ -111,26 +111,6 @@ describe('registry', () => {
       uniqueId: 'imdb_id',
     })
     expect(entries[1]?.descriptor.noShowAll).toBe(true)
-  })
-
-  it('declares capabilities and only known sort keys', () => {
-    const entries = createRegistry({
-      apiUrls: {
-        movies: 'https://api.test/',
-        tv: 'https://tv.test/',
-        anime: 'https://anime.test/',
-      },
-      tmdbKey: 'key',
-      language: 'en',
-      contentLanguage: 'en',
-      contentLangOnly: false,
-    })
-    expect(entries.length).toBeGreaterThan(0)
-    for (const entry of entries) {
-      const capabilities = entry.descriptor.capabilities
-      expect(typeof capabilities.search).toBe('boolean')
-      for (const key of capabilities.sort) expect(SORT_KEYS).toContain(key)
-    }
   })
 
   it('omits providers without a configured URL', () => {

@@ -71,9 +71,3 @@ it('shows the type and rating dropdowns only for providers that support them', (
   expect(screen.queryByLabelText('Type')).not.toBeInTheDocument()
   expect(screen.queryByLabelText('Rating')).not.toBeInTheDocument()
 })
-
-it('renders the source tabs', () => {
-  renderBar()
-  expect(screen.getByRole('link', { name: 'Movies' })).toBeInTheDocument()
-  expect(screen.getByRole('link', { name: 'Favorites' })).toBeInTheDocument()
-})

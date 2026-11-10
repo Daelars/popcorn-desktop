@@ -267,8 +267,12 @@ describe('PlaybackTargets', () => {
     }
 
     // Local is a no-op; external hands the session URL to the player.
-    await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.play(local, 'session-1')))
-    await runtime.runPromise(Effect.flatMap(PlaybackTargets, (t) => t.play(external, 'session-1')))
+    await runtime.runPromise(
+      Effect.flatMap(PlaybackTargets, (t) => t.play(local, { sessionId: 'session-1' })),
+    )
+    await runtime.runPromise(
+      Effect.flatMap(PlaybackTargets, (t) => t.play(external, { sessionId: 'session-1' })),
+    )
     expect(launched).toEqual(['VLC'])
 
     await runtime.dispose()
@@ -299,7 +303,7 @@ describe('PlaybackTargets', () => {
         // session reports the external state.
         const collected = yield* session.states(id).pipe(
           Stream.tap((state) =>
-            state.state === 'ready' ? playback.play(target, id) : Effect.void,
+            state.state === 'ready' ? playback.play(target, { sessionId: id }) : Effect.void,
           ),
           Stream.takeUntil((state) => state.state === 'playingExternally'),
           Stream.runCollect,

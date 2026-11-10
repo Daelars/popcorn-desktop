@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http'
 import type { Readable } from 'node:stream'
 import { Effect, type Scope } from 'effect'
 import { TorrentError } from '../shared/errors'
+import { contentTypeForFile } from '../shared/playback-rules'
 
 export interface ByteRange {
   readonly start: number
@@ -13,22 +14,9 @@ export interface ServedFile {
   readonly length: number
 }
 
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
-  '.mp4': 'video/mp4',
-  '.mkv': 'video/x-matroska',
-  '.webm': 'video/webm',
-  '.avi': 'video/x-msvideo',
-  '.mov': 'video/quicktime',
-  '.srt': 'application/x-subrip',
-  '.vtt': 'text/vtt',
-}
-
+/** The `Content-Type` the loopback server answers with; shared with the player. */
 export function contentType(name: string): string {
-  const dot = name.lastIndexOf('.')
-  return (
-    (dot === -1 ? undefined : CONTENT_TYPES[name.slice(dot).toLowerCase()]) ??
-    'application/octet-stream'
-  )
+  return contentTypeForFile(name)
 }
 
 /** Single-range `bytes=start-end` parser; multi-range is not supported, matching the legacy server. */
