@@ -34,7 +34,10 @@ export function usePlayerKeys(actions: PlayerKeyActions): void {
       const ctrl = event.ctrlKey
       const seek = shift ? 60 : ctrl ? 600 : 5
       const volume = shift ? 0.5 : ctrl ? 1 : 0.1
-      switch (event.key) {
+      // Shift+digit changes `event.key` to `!@#$…`; `event.code` keeps the digit, so the
+      // legacy `shift+1..8` filter bindings actually fire.
+      const key = event.code.startsWith('Digit') ? event.code.slice('Digit'.length) : event.key
+      switch (key) {
         case 'Escape':
         case 'Backspace':
           event.preventDefault()

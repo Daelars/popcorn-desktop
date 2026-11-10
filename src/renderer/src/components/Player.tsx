@@ -9,11 +9,11 @@ import { fileSize } from '../format'
 import { type PlayerKeyActions, usePlayerKeys } from '../hooks/usePlayerKeys'
 import {
   applySubtitleStyles,
-  installLegacyPlayer,
+  createVideoEngine,
   loadCustomSubtitle,
   type SubtitleStyleSettings,
-} from '../player/legacy-vjs4'
-import videojs from '../player/videojs'
+  type VideoEngine,
+} from '../player/engine'
 import { useSettings } from '../settings'
 
 export interface SubtitleTrack {
@@ -109,7 +109,7 @@ export function Player({
   onMinimize,
 }: PlayerProps) {
   const playerElRef = useRef<HTMLDivElement>(null)
-  const playerRef = useRef<ReturnType<typeof videojs> | null>(null)
+  const playerRef = useRef<VideoEngine | null>(null)
   const [playerEl, setPlayerEl] = useState<HTMLElement | null>(null)
   const [progress, setProgress] = useState<IpcEventPayload<'streams:progress'> | undefined>(
     undefined,
@@ -191,7 +191,6 @@ export function Player({
   useEffect(() => {
     const container = playerElRef.current
     if (container === null) return
-    installLegacyPlayer()
 
     const video = document.createElement('video')
     video.id = 'video_player'
@@ -204,7 +203,7 @@ export function Player({
     container.append(video)
 
     // Trailers take the legacy youtube branch: the youtube tech instead of the plugins.
-    const player = videojs(
+    const player = createVideoEngine(
       video,
       isTrailer
         ? {
