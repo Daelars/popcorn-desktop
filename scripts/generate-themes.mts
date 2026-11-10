@@ -4,9 +4,9 @@ import stylus from 'stylus'
 
 // pnpm scripts run from the repo root, and so does Vitest.
 const root = process.cwd()
-const stylDir = join(root, 'src/app/styl')
+const stylDir = join(root, 'legacy/styl')
 const outDir = join(root, 'resources/themes')
-const settingsFile = join(root, 'src/app/settings.js')
+const settingsFile = join(root, 'legacy/settings.js')
 
 const TOKEN_DECLARATION = /^\s*\$([\w-]+)\s*=\s*(.+?)\s*$/gm
 const TOKEN_PROPERTY = /--([\w-]+):\s*([^;]+);/g

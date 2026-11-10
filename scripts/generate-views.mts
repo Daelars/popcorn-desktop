@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import stylus from 'stylus'
 
 const root = process.cwd()
-const stylDir = join(root, 'src/app/styl')
+const stylDir = join(root, 'legacy/styl')
 const outFile = join(root, 'resources/themes/views.css')
 const TOKEN_DECLARATION = /^\s*\$([\w-]+)\s*=/gm
 

@@ -142,7 +142,7 @@ export function resolveWindowPlacement(
   return { bounds: { x, y, width, height }, maximized: saved?.maximized ?? false }
 }
 
-/** The legacy tray icon (`src/app/images/icon.png`), resolved for dev and packaged builds. */
+/** The tray icon (`legacy/images/icon.png`, copied to `resources/images`), resolved for dev and packaged builds. */
 function trayImage(): NativeImage {
   const candidates = [
     join(__dirname, '../renderer/images/icon.png'),

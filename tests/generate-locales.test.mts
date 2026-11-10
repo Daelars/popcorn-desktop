@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { transformPlaceholders } from '../scripts/generate-locales.mts'
 
 const root = process.cwd()
-const sourceDir = join(root, 'src/app/language')
+const sourceDir = join(root, 'legacy/language')
 const outDir = join(root, 'resources/locales')
 
 describe('transformPlaceholders', () => {
