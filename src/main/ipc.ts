@@ -153,10 +153,20 @@ const handlers = {
   'local:stop': ({ port }) => Effect.flatMap(LocalFiles, (local) => local.stop(port)),
   'local:subtitle': ({ path, origin }) =>
     Effect.flatMap(LocalFiles, (local) => local.subtitle(path, origin)),
-  'subtitles:list': ({ imdbId }) =>
-    Effect.flatMap(SubtitlesService, (subtitles) => subtitles.list(imdbId)),
-  'subtitles:fetch': ({ imdbId, lang, origin }) =>
-    Effect.flatMap(SubtitlesService, (subtitles) => subtitles.fetch(imdbId, lang, origin)),
+  'subtitles:list': ({ imdbId, season, episode }) =>
+    Effect.flatMap(SubtitlesService, (subtitles) =>
+      subtitles.list(imdbId, {
+        ...(season === undefined ? {} : { season }),
+        ...(episode === undefined ? {} : { episode }),
+      }),
+    ),
+  'subtitles:fetch': ({ imdbId, lang, origin, season, episode }) =>
+    Effect.flatMap(SubtitlesService, (subtitles) =>
+      subtitles.fetch(imdbId, lang, origin, {
+        ...(season === undefined ? {} : { season }),
+        ...(episode === undefined ? {} : { episode }),
+      }),
+    ),
   'updates:check': ({ manual }) =>
     Effect.flatMap(UpdatesService, (updates) => updates.check(manual)),
   'updates:download': () => Effect.flatMap(UpdatesService, (updates) => updates.download()),

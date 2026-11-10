@@ -162,6 +162,8 @@ export function PlayerPage() {
               imdbId,
               lang: subtitleLang,
               origin: window.location.origin,
+              ...(params.get('season') === null ? {} : { season: params.get('season') ?? '' }),
+              ...(params.get('episode') === null ? {} : { episode: params.get('episode') ?? '' }),
             })
             tracks = [
               ...tracks,
@@ -202,7 +204,7 @@ export function PlayerPage() {
         void stop(port).catch(() => undefined)
       }
     }
-  }, [source, localPath, fileIndex, chosenPlayer, subtitleLang, imdbId])
+  }, [source, localPath, fileIndex, chosenPlayer, subtitleLang, imdbId, params])
 
   // `handleVideoFile` titled a local file with its name; torrents use the passed title.
   const displayTitle = title === '' ? (localPath === '' ? source : localTitle || localPath) : title
