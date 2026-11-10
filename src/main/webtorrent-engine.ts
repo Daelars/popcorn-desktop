@@ -19,6 +19,7 @@ function progressStream(torrent: WebTorrentTorrent): Stream.Stream<TorrentProgre
         downloaded: torrent.downloaded,
         uploaded: torrent.uploaded,
         speed: torrent.downloadSpeed,
+        uploadSpeed: torrent.uploadSpeed,
         peers: torrent.numPeers,
         progress: torrent.progress,
         length: torrent.length,
@@ -53,7 +54,7 @@ function statusOf(torrent: WebTorrentTorrent): TorrentStatus {
   }
 }
 
-function handleOf(torrent: WebTorrentTorrent): TorrentHandle {
+export function handleOf(torrent: WebTorrentTorrent): TorrentHandle {
   const fileAt = (index: number) => {
     const file = torrent.files[index]
     if (file === undefined) {
@@ -74,8 +75,12 @@ function handleOf(torrent: WebTorrentTorrent): TorrentHandle {
     select: (index) =>
       Effect.try({
         try: () => {
-          torrent.select(index, 1)
           const file = fileAt(index)
+          // WebTorrent selects every file when a torrent is added; drop all of it, then
+          // select just the file to play, so a season pack does not download whole.
+          torrent.deselect(0, torrent.pieces.length - 1)
+          for (const candidate of torrent.files) candidate.deselect()
+          file.select(1)
           return { name: file.name, length: file.length }
         },
         catch: (cause) =>
@@ -242,15 +247,24 @@ export const WebTorrentEngineLive = Layer.scoped(
         }),
     )
     // Live apply: connection and speed limit changes reach the running client in one tick.
+    // Only the runtime-tunable keys matter; DHT/secure stay constructor options.
+    const liveKeys: ReadonlySet<string> = new Set([
+      'connectionLimit',
+      'downloadLimit',
+      'uploadLimit',
+      'maxLimitMult',
+    ])
     yield* settings.changes.pipe(
-      Stream.runForEach(() =>
-        Effect.gen(function* () {
-          const current = yield* settings.snapshot
-          const limits = liveLimits(current)
-          client.maxConns = limits.maxConns
-          client.throttleDownload(limits.downloadLimit)
-          client.throttleUpload(limits.uploadLimit)
-        }),
+      Stream.runForEach((change) =>
+        liveKeys.has(change.key)
+          ? Effect.gen(function* () {
+              const current = yield* settings.snapshot
+              const limits = liveLimits(current)
+              client.maxConns = limits.maxConns
+              client.throttleDownload(limits.downloadLimit)
+              client.throttleUpload(limits.uploadLimit)
+            })
+          : Effect.void,
       ),
       Effect.forkScoped,
     )

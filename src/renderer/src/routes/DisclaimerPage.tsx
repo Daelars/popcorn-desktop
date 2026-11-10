@@ -30,7 +30,10 @@ export function DisclaimerPage() {
     },
   })
 
-  if (status.data?.accepted !== false) return null
+  // Fail closed: only an explicit acceptance hides the terms. A failed status check shows
+  // them. While the check is pending, render nothing so the terms do not flash over the shell.
+  if (status.isPending) return null
+  if (status.data?.accepted === true) return null
 
   return (
     <div id="disclaimer-container">

@@ -46,6 +46,7 @@ function fixtureProfile(): { legacyRoot: string; backupDir: string } {
     [
       JSON.stringify({ key: 'theme', value: 'Official_-_Light_theme', _id: 's1' }),
       JSON.stringify({ key: 'postersWidth', value: 234, _id: 's2' }),
+      JSON.stringify({ key: 'disclaimerAccepted', value: 1, _id: 's3' }),
     ].join('\n'),
   )
   writeFileSync(
@@ -73,7 +74,7 @@ describe('migrateLegacy', () => {
       bookmarks: 2,
       watchedMovies: 1,
       watchedEpisodes: 1,
-      settings: 2,
+      settings: 3,
       movies: 1,
       shows: 1,
     })
@@ -91,6 +92,10 @@ describe('migrateLegacy', () => {
     ])
     expect(db.prepare('SELECT value FROM settings WHERE key = ?').get('postersWidth')).toEqual({
       value: '234',
+    })
+    // The port reads the disclaimer from `meta`; the legacy acceptance must carry over.
+    expect(db.prepare('SELECT value FROM meta WHERE key = ?').get('disclaimerAccepted')).toEqual({
+      value: 'true',
     })
     expect(existsSync(join(backupDir, 'bookmarks.db'))).toBe(true)
   })
