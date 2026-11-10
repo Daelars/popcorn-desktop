@@ -3,6 +3,30 @@ import { PlaybackTarget } from './playback'
 import { FetchResult, Filters, Provider, TabFilters } from './provider'
 import type { Settings, SettingsKey } from './settings'
 
+/** Which user store a database flush clears; mirrors the legacy database files. */
+export const DatabaseFlushScope = Schema.Literal('bookmarks', 'watched', 'settings', 'all')
+export type DatabaseFlushScope = Schema.Schema.Type<typeof DatabaseFlushScope>
+
+/** The data types a database import can restore, matching the legacy import checkboxes. */
+export const DatabaseImportPart = Schema.Literal('watched', 'bookmarks', 'torrents', 'settings')
+export type DatabaseImportPart = Schema.Schema.Type<typeof DatabaseImportPart>
+
+/** Real database identity and row counts, for the initializing screen and the settings page. */
+export const DatabaseStatus = Schema.Struct({
+  schemaVersion: Schema.Number,
+  journalMode: Schema.String,
+  counts: Schema.Struct({
+    bookmarks: Schema.Number,
+    movies: Schema.Number,
+    shows: Schema.Number,
+    watchedMovies: Schema.Number,
+    watchedEpisodes: Schema.Number,
+    torrents: Schema.Number,
+    settings: Schema.Number,
+  }),
+})
+export type DatabaseStatus = Schema.Schema.Type<typeof DatabaseStatus>
+
 /** Request/response contracts for every IPC channel. Validated on both sides. */
 export const contracts = {
   'settings:get': {
@@ -288,6 +312,38 @@ export const contracts = {
   },
   'collection:rename': {
     request: Schema.Struct({ id: Schema.Number, name: Schema.String }),
+    response: Schema.Undefined,
+  },
+  /** `settings_container.js`: flush, rebuild, reset, export and import the databases. */
+  'database:status': {
+    request: Schema.Struct({}),
+    response: DatabaseStatus,
+  },
+  'database:flush': {
+    request: Schema.Struct({ scope: DatabaseFlushScope }),
+    response: Schema.Undefined,
+  },
+  /** `rebuildBookmarks`: drop the cached snapshots of bookmarked titles so they refetch. */
+  'database:rebuild': {
+    request: Schema.Struct({}),
+    response: Schema.Undefined,
+  },
+  /** `resetSettings`: drop the persisted settings so the defaults apply on the next boot. */
+  'database:reset': {
+    request: Schema.Struct({}),
+    response: Schema.Undefined,
+  },
+  /** `init_modal.js:fixApp`: repair a database that keeps a boot from finishing. */
+  'database:repair': {
+    request: Schema.Struct({}),
+    response: Schema.Undefined,
+  },
+  'database:export': {
+    request: Schema.Struct({ path: Schema.String }),
+    response: Schema.Undefined,
+  },
+  'database:import': {
+    request: Schema.Struct({ path: Schema.String, parts: Schema.Array(DatabaseImportPart) }),
     response: Schema.Undefined,
   },
   'torrents:list': {

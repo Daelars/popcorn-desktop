@@ -285,6 +285,19 @@ const handlers = {
     Effect.flatMap(DatabaseService, (database) => database.collection.remove(id)),
   'collection:rename': ({ id, name }) =>
     Effect.flatMap(DatabaseService, (database) => database.collection.rename(id, name)),
+  'database:status': () =>
+    Effect.flatMap(DatabaseService, (database) => database.maintenance.status),
+  'database:flush': ({ scope }) =>
+    Effect.flatMap(DatabaseService, (database) => database.maintenance.flush(scope)),
+  'database:rebuild': () =>
+    Effect.flatMap(DatabaseService, (database) => database.maintenance.rebuild),
+  'database:reset': () => Effect.flatMap(DatabaseService, (database) => database.maintenance.reset),
+  'database:repair': () =>
+    Effect.flatMap(DatabaseService, (database) => database.maintenance.repair),
+  'database:export': ({ path }) =>
+    Effect.flatMap(DatabaseService, (database) => database.maintenance.export(path)),
+  'database:import': ({ path, parts }) =>
+    Effect.flatMap(DatabaseService, (database) => database.maintenance.import(path, parts)),
   'torrents:list': () => Effect.flatMap(StreamSession, (sessions) => sessions.list),
   'torrents:pause': ({ infoHash }) =>
     Effect.flatMap(StreamSession, (sessions) => sessions.pause(infoHash)),
