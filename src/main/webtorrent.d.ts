@@ -48,6 +48,7 @@ declare module 'webtorrent' {
     readonly uploadLimit?: number | undefined
     readonly dht?: { readonly concurrency?: number | undefined } | undefined
     readonly secure?: boolean | undefined
+    readonly utp?: boolean | undefined
     readonly tracker?: { readonly announce?: ReadonlyArray<string> | undefined } | undefined
   }
 

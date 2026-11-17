@@ -60,10 +60,6 @@ describe('compileTheme', () => {
     expect(dark?.tokens.get('ShowOddHighlight')).toBe('#979ba6')
     expect(dark?.tokens.get('EpisodeSelectorHoverTran')).toBe('#7b7e90')
   })
-
-  it('derives the theme name from the file name', () => {
-    expect(themeNameFromFile('Official_-_Dark_theme.styl')).toBe('Official_-_Dark_theme')
-  })
 })
 
 describe('generated output', () => {

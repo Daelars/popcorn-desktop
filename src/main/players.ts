@@ -277,6 +277,9 @@ export function scanPlayers(
         if (match === undefined) continue
         const info = await stat(candidate).catch(() => undefined)
         if (info === undefined) continue
+        // A player's install folder (`C:\Program Files\VideoLAN\VLC`) matches by name too;
+        // only macOS `.app` bundles launch through their directory, the rest must be files.
+        if (info.isDirectory() && !candidate.endsWith('.app')) continue
         const born = info.birthtimeMs
         const previous = found.get(match.name)
         if (previous === undefined || born > previous.born) {
@@ -308,9 +311,10 @@ export function launchPlayer(
 ): Effect.Effect<void, PlaybackError> {
   const { file, prefix } = playerCommand(player)
   return Effect.async<void, PlaybackError>((resume) => {
+    // The cause is dropped when failures cross IPC, so its message rides along here.
     const fail = (cause: unknown) =>
       new PlaybackError({
-        message: `cannot launch ${player.id}`,
+        message: `cannot launch ${player.id}: ${cause instanceof Error ? cause.message : String(cause)}`,
         target: player.id,
         operation: 'launch',
         cause,
