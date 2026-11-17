@@ -45,7 +45,7 @@ function failingStoreLayer() {
 }
 
 function legacyKeys(): string[] {
-  const source = readFileSync('src/app/settings.js', 'utf8')
+  const source = readFileSync('legacy/settings.js', 'utf8')
   const assigned = [...source.matchAll(/^Settings\.([A-Za-z_][\w]*)\s*=/gm)].map(
     (m) => m[1] as string,
   )

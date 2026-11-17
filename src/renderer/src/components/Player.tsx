@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -117,6 +117,8 @@ export function Player({
   const [playingNext, setPlayingNext] = useState(false)
   const [countdown, setCountdown] = useState(60)
   const [nextDismissed, setNextDismissed] = useState(false)
+  /** The video element failed to load (e.g. AVI in Chromium); offer an external player. */
+  const [mediaError, setMediaError] = useState(false)
   // The interval/ended handlers run inside the player effect; a ref carries the dismissal in.
   const nextDismissedRef = useRef(false)
   const [metadataVerified, setMetadataVerified] = useState(false)
@@ -141,6 +143,26 @@ export function Player({
       settings?.subtitles_bold,
       settings?.playerSubPosition,
     ],
+  )
+
+  // External targets for the error banner: the `videojshooks.js` fallback named the
+  // installed player (VLC) instead of failing silently.
+  const playbackTargets = useQuery({
+    queryKey: ['playback-targets'],
+    queryFn: () => popcorn().invoke('playback:targets', {}),
+  })
+  const externalTargets = (playbackTargets.data ?? []).filter((target) => target.kind !== 'local')
+
+  /** Switch to an external player; PlayerPage re-routes to the panel on this setting. */
+  const switchToExternal = useCallback(
+    (id: string) => {
+      void popcorn()
+        .invoke('settings:set', { key: 'chosenPlayer', value: id })
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ['settings'] })
+        })
+    },
+    [queryClient],
   )
 
   const liveSettings = useRef({
@@ -260,6 +282,9 @@ export function Player({
           error?.message ?? 'unknown playback error',
           player.currentSrc(),
         )
+        // `videojshooks.js` replaced the video.js error with an external-player hint;
+        // without this the player sits on a black screen (e.g. AVI in Chromium).
+        setMediaError(true)
       })
     })
     // `mouseScroll` from player.js: wheel up/down adjusts the volume (inverted on macOS).
@@ -603,6 +628,31 @@ export function Player({
       ref={playerElRef}
       style={minimized ? { height: 0, width: 0 } : undefined}
     >
+      {mediaError ? (
+        <div className="player-error" style={{ display: 'flex' }}>
+          <p className="player-error-title">{t('The video playback encountered an issue.')}</p>
+          <p className="player-error-body">
+            {externalTargets.length > 0
+              ? t('Please try an external player to view this content.')
+              : t('This file needs an external player like VLC.')}
+          </p>
+          <div className="player-error-actions">
+            {externalTargets.map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                className="player-error-button"
+                onClick={() => switchToExternal(target.id)}
+              >
+                {t('Play in {{0}}', { 0: target.name })}
+              </button>
+            ))}
+            <button type="button" className="player-error-button" onClick={onClose}>
+              {t('Back')}
+            </button>
+          </div>
+        </div>
+      ) : null}
       {playerEl === null
         ? null
         : createPortal(

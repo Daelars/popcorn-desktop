@@ -5,7 +5,11 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router'
 import { Show } from '../../../shared'
 import type { StreamState } from '../../../shared/ipc'
-import { nextEpisode as nextEpisodeRule } from '../../../shared/playback-rules'
+import {
+  contentTypeForFile,
+  needsExternalPlayer,
+  nextEpisode as nextEpisodeRule,
+} from '../../../shared/playback-rules'
 import { popcorn } from '../bridge'
 import { ExternalPlayerPanel } from '../components/ExternalPlayerPanel'
 import { LoadingScreen } from '../components/LoadingScreen'
@@ -48,6 +52,8 @@ export function PlayerPage() {
   const [failure, setFailure] = useState<string>()
   const [minimized, setMinimized] = useState(false)
   const [localTitle, setLocalTitle] = useState('')
+  /** The served file's name, once known; decides the declared MIME type. */
+  const [fileName, setFileName] = useState<string>()
   const [subtitles, setSubtitles] = useState<ReadonlyArray<SubtitleTrack>>([])
   /** The loading state machine for the session this page started, keyed by its id. */
   const [streamState, setStreamState] = useState<StreamState>()
@@ -128,13 +134,15 @@ export function PlayerPage() {
   useEffect(() => {
     const bridge = popcorn()
     if (source === '' && localPath === '') return
-    // A local file always plays in the built-in player; torrents respect the chosen player.
-    if (chosenPlayer !== 'local' && localPath === '') return
+    // An external target plays through the panel for torrents and local files alike;
+    // the built-in player below only serves the `local` target.
+    if (chosenPlayer !== 'local') return
     let cancelled = false
     // A new source shows the connecting screen again instead of the previous player.
     setSrc(undefined)
     setFailure(undefined)
     setStreamState(undefined)
+    setFileName(undefined)
     const kind = localPath === '' ? 'stream' : 'local'
     sessionKind.current = kind
     const stop = (port: number) =>
@@ -161,7 +169,8 @@ export function PlayerPage() {
           return
         }
         let tracks: ReadonlyArray<SubtitleTrack> = []
-        if (kind === 'local' && 'name' in session) {
+        if ('name' in session && session.name !== undefined) setFileName(session.name)
+        if (kind === 'local' && 'name' in session && session.name !== undefined) {
           setLocalTitle(session.name)
           if (session.subtitle !== undefined) {
             // A sidecar subtitle arrives with the video; `checkSubs` looked for it the same way.
@@ -251,14 +260,16 @@ export function PlayerPage() {
       </section>
     )
   }
-  if (chosenPlayer !== 'local' && localPath === '') {
-    // A concrete target id (not `local`) plays through an external player; branch on kind.
+  if (chosenPlayer !== 'local') {
+    // A concrete target id (not `local`) plays through an external player, whether the
+    // source is a torrent or a dropped local file.
     return (
       <ExternalPlayerPanel
         source={source}
         title={displayTitle}
         fileIndex={fileIndex}
         targetId={chosenPlayer}
+        {...(localPath === '' ? {} : { localPath })}
       />
     )
   }
@@ -288,12 +299,17 @@ export function PlayerPage() {
       />
     )
   }
+  // Containers Chromium cannot demux (AVI, WMV) declare their real type so the player
+  // fails fast into the external-player banner; everything else keeps the legacy
+  // `video/mp4` declaration that lets the container be sniffed from the stream.
+  const mimeType =
+    fileName !== undefined && needsExternalPlayer(fileName)
+      ? contentTypeForFile(fileName)
+      : 'video/mp4'
   return (
     <Player
       src={src}
-      // `streamer.js` declared every local stream as `video/mp4`; the type is what lets the
-      // player accept the source, while the container is sniffed from the stream itself.
-      type="video/mp4"
+      type={mimeType}
       title={displayTitle}
       quality={quality === '' ? undefined : quality}
       media={media}

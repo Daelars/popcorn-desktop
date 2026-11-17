@@ -228,6 +228,7 @@ const handlers = {
           infoHash: done.infoHash,
           port: done.port,
           url: done.url,
+          ...(done.name === undefined ? {} : { name: done.name }),
           ...(done.subtitle === undefined ? {} : { subtitle: done.subtitle }),
         }
       }),
@@ -240,7 +241,7 @@ const handlers = {
   'search:torrents': ({ query, category }) =>
     Effect.flatMap(SearchService, (search) => search.search(query, category)),
   'playback:targets': () => Effect.flatMap(PlaybackTargets, (targets) => targets.list),
-  'playback:play': ({ targetId, sessionId, title, subtitle, fullscreen }) =>
+  'playback:play': ({ targetId, ...request }) =>
     Effect.flatMap(PlaybackTargets, (targets) =>
       Effect.gen(function* () {
         const target = (yield* targets.list).find((candidate) => candidate.id === targetId)
@@ -253,7 +254,23 @@ const handlers = {
             }),
           )
         }
-        yield* targets.play(target, sessionId, {
+        const { title, subtitle, fullscreen } = request
+        const source =
+          'sessionId' in request && request.sessionId !== undefined
+            ? { sessionId: request.sessionId }
+            : 'url' in request && typeof request.url === 'string'
+              ? { url: request.url }
+              : undefined
+        if (source === undefined) {
+          return yield* Effect.fail(
+            new PlaybackError({
+              message: 'playback needs a sessionId or a url',
+              target: targetId,
+              operation: 'play',
+            }),
+          )
+        }
+        yield* targets.play(target, source, {
           ...(title === undefined ? {} : { title }),
           ...(subtitle === undefined ? {} : { subtitle }),
           ...(fullscreen === undefined ? {} : { fullscreen }),

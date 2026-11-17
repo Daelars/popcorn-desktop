@@ -360,9 +360,9 @@ const showFixture = {
   ],
 }
 
-it('offers the next episode in the final minute and plays it on demand', async () => {
+it('offers the next episode in the final minute, plays it on demand and closes past it', async () => {
   const calls = stubBridge({ show: showFixture, settings: { playNextEpisodeAuto: true } })
-  renderPlayer({ imdbId: 'tt0903747', tvdbId: '81189', season: '1', episode: '1' })
+  renderPlayer({ imdbId: 'tt0903747', tvdbId: '81189', season: '1', episode: '1' }, true)
 
   await waitFor(() => {
     expect(document.querySelector('.player')).not.toBeNull()
@@ -387,6 +387,12 @@ it('offers the next episode in the final minute and plays it on demand', async (
         String((call.payload as { torrentId?: string }).torrentId).includes('second'),
       ),
     ).toBe(true)
+  })
+
+  // Next episode replaces the current history entry, so closing returns home, not the old episode.
+  fireEvent.click(document.querySelector('.close-info-player') as HTMLElement)
+  await waitFor(() => {
+    expect(screen.getByText('Home')).toBeInTheDocument()
   })
 })
 
@@ -420,38 +426,5 @@ it('stops offering the next episode after "No thank you"', async () => {
   await waitFor(() => {
     const overlay = document.querySelector('.playing_next') as HTMLElement | null
     expect(overlay?.style.display).not.toBe('block')
-  })
-})
-
-it('closes to the page before the player after playing the next episode', async () => {
-  const calls = stubBridge({ show: showFixture, settings: { playNextEpisodeAuto: true } })
-  renderPlayer({ imdbId: 'tt0903747', tvdbId: '81189', season: '1', episode: '1' }, true)
-
-  await waitFor(() => {
-    expect(document.querySelector('.player')).not.toBeNull()
-  })
-  playerMock.duration.mockReturnValue(120)
-  playerMock.currentTime.mockReturnValue(80)
-
-  await waitFor(
-    () => {
-      expect(document.querySelector('#nextCountdown')?.textContent).toBe('40')
-    },
-    { timeout: 4000 },
-  )
-  fireEvent.click(screen.getByText('Play Now'))
-  await waitFor(() => {
-    const started = calls.filter((call) => call.channel === 'stream:start')
-    expect(
-      started.some((call) =>
-        String((call.payload as { torrentId?: string }).torrentId).includes('second'),
-      ),
-    ).toBe(true)
-  })
-
-  // Next episode replaces the current history entry, so closing returns home, not the old episode.
-  fireEvent.click(document.querySelector('.close-info-player') as HTMLElement)
-  await waitFor(() => {
-    expect(screen.getByText('Home')).toBeInTheDocument()
   })
 })

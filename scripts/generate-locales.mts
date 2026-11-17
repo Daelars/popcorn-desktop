@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 // pnpm scripts run from the repo root, and so does Vitest.
 const root = process.cwd()
-const sourceDir = join(root, 'src/app/language')
+const sourceDir = join(root, 'legacy/language')
 const outDir = join(root, 'resources/locales')
 
 /**
@@ -28,7 +28,7 @@ export function transformLocale(entries: Record<string, string>): Record<string,
   )
 }
 
-/** Transforms every locale under src/app/language into resources/locales. Returns the file names written. */
+/** Transforms every locale under legacy/language into resources/locales. Returns the file names written. */
 export async function generateAll(): Promise<string[]> {
   const files = (await readdir(sourceDir)).filter((file) => file.endsWith('.json')).sort()
   if (files.length === 0) {

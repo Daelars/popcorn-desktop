@@ -27,10 +27,6 @@ export class DbError extends Data.TaggedError('DbError')<
   ErrorFields & { readonly operation: string }
 > {}
 
-export class DeviceError extends Data.TaggedError('DeviceError')<
-  ErrorFields & { readonly device: string; readonly operation: string }
-> {}
-
 /** A one-time legacy migration that failed; startup recovers and continues empty. */
 export class MigrationError extends Data.TaggedError('MigrationError')<
   ErrorFields & { readonly operation: string }
@@ -44,13 +40,3 @@ export class PlaybackError extends Data.TaggedError('PlaybackError')<
 export class SettingsError extends Data.TaggedError('SettingsError')<
   ErrorFields & { readonly key: string }
 > {}
-
-export type ServiceError =
-  | TorrentError
-  | ProviderError
-  | SubtitleError
-  | DbError
-  | DeviceError
-  | MigrationError
-  | PlaybackError
-  | SettingsError

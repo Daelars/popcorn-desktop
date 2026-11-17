@@ -25,7 +25,8 @@
     "generate:views": "node scripts/generate-views.mts",
     "generate": "pnpm generate:themes && pnpm generate:locales && pnpm generate:views",
     "test": "vitest run",
-    "smoke:packaged": "node scripts/smoke-packaged.mts"
+    "smoke:packaged": "node scripts/smoke-packaged.mts",
+    "monitor:refactor": "node scripts/refactor-status.mts"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.3.1",

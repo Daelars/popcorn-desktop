@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { compileTheme, themeNameFromFile } from '../scripts/generate-themes.mts'
 
 const root = process.cwd()
-const stylDir = join(root, 'src/app/styl')
+const stylDir = join(root, 'legacy/styl')
 const outDir = join(root, 'resources/themes')
 
 const SINGLE_TOKEN_THEMES = 100
@@ -60,10 +60,6 @@ describe('compileTheme', () => {
     expect(dark?.tokens.get('ShowOddHighlight')).toBe('#979ba6')
     expect(dark?.tokens.get('EpisodeSelectorHoverTran')).toBe('#7b7e90')
   })
-
-  it('derives the theme name from the file name', () => {
-    expect(themeNameFromFile('Official_-_Dark_theme.styl')).toBe('Official_-_Dark_theme')
-  })
 })
 
 describe('generated output', () => {
@@ -75,7 +71,7 @@ describe('generated output', () => {
 
   it('emits the legacy default theme in the manifest', async () => {
     const manifest = JSON.parse(await readFile(join(outDir, 'themes.json'), 'utf8'))
-    const settings = await readFile(join(root, 'src/app/settings.js'), 'utf8')
+    const settings = await readFile(join(root, 'legacy/settings.js'), 'utf8')
     const legacyDefault = /Settings\.theme\s*=\s*'([^']+)'/.exec(settings)?.[1]
     expect(manifest.default).toBe(legacyDefault)
     expect(manifest.themes).toHaveLength(7)

@@ -229,6 +229,8 @@ export const contracts = {
       infoHash: Schema.String,
       port: Schema.Number,
       url: Schema.String,
+      /** The chosen file's name, for MIME and external-player decisions. */
+      name: Schema.optional(Schema.String),
       /** The served WebVTT url, when the subtitle step found one. */
       subtitle: Schema.optional(Schema.String),
     }),
@@ -283,13 +285,23 @@ export const contracts = {
     response: Schema.Array(PlaybackTarget),
   },
   'playback:play': {
-    request: Schema.Struct({
-      targetId: Schema.String,
-      sessionId: Schema.String,
-      title: Schema.optional(Schema.String),
-      subtitle: Schema.optional(Schema.String),
-      fullscreen: Schema.optional(Schema.Boolean),
-    }),
+    request: Schema.Union(
+      Schema.Struct({
+        targetId: Schema.String,
+        sessionId: Schema.String,
+        title: Schema.optional(Schema.String),
+        subtitle: Schema.optional(Schema.String),
+        fullscreen: Schema.optional(Schema.Boolean),
+      }),
+      // Local files have no stream session; the renderer hands over their loopback URL.
+      Schema.Struct({
+        targetId: Schema.String,
+        url: Schema.String,
+        title: Schema.optional(Schema.String),
+        subtitle: Schema.optional(Schema.String),
+        fullscreen: Schema.optional(Schema.Boolean),
+      }),
+    ),
     response: Schema.Undefined,
   },
   'disclaimer:status': {

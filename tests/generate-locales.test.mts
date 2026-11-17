@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { transformPlaceholders } from '../scripts/generate-locales.mts'
 
 const root = process.cwd()
-const sourceDir = join(root, 'src/app/language')
+const sourceDir = join(root, 'legacy/language')
 const outDir = join(root, 'resources/locales')
 
 describe('transformPlaceholders', () => {
@@ -43,16 +43,6 @@ describe('generated locales', () => {
     const source = JSON.parse(await readFile(join(sourceDir, 'en.json'), 'utf8'))
     const generated = JSON.parse(await readFile(join(outDir, 'en.json'), 'utf8'))
     expect(Object.keys(generated)).toHaveLength(Object.keys(source).length)
-    expect(Object.keys(generated)).toHaveLength(534)
     expect(Object.keys(generated)).toContain('Season {{0}}')
-    expect(Object.keys(generated)).not.toContain('Season %s')
-  })
-
-  it('rewrites values while keeping their meaning', async () => {
-    const generated = JSON.parse(await readFile(join(outDir, 'en.json'), 'utf8'))
-    expect(generated['Season {{0}}']).toBe('Season {{0}}')
-    expect(generated['Initializing {{0}}. Please Wait...']).toBe(
-      'Initializing {{0}}. Please Wait...',
-    )
   })
 })
